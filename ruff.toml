@@ -1,0 +1,43 @@
+target-version = "py312"
+line-length = 100
+src = ["src", "tests", "scripts"]
+extend-exclude = ["notebooks", "data", ".venv"]
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade
+    "N",    # pep8-naming
+    "SIM",  # flake8-simplify
+    "TID",  # flake8-tidy-imports
+    "PL",   # pylint (subset)
+    "RUF",  # ruff-specific
+    "ASYNC",
+    "S",    # bandit security rules
+    "PTH",  # use pathlib
+    "DTZ",  # datetime timezones required
+]
+ignore = [
+    "E501",    # line length handled by formatter
+    "PLR0913", # too many args — acceptable for signal functions
+    "PLR2004", # magic-value comparisons OK in tests/config
+    "S101",    # assert used — fine in tests
+]
+
+[lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106", "PLR2004", "N802", "N803"]
+"scripts/**/*.py" = ["T201"]  # prints are fine in CLIs
+"**/__init__.py" = ["F401"]   # re-exports without use
+
+[lint.isort]
+known-first-party = ["quant"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

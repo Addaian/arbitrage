@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+.Python
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# uv
+# keep uv.lock checked in; ignore .python-version if personal
+.python-version
+
+# Testing / type checking / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+notebooks/scratch/
+
+# Data artefacts (never commit market data)
+data/
+!data/.gitkeep
+*.parquet
+*.feather
+*.csv
+!tests/fixtures/**/*.csv
+
+# Model artefacts
+*.pkl
+*.joblib
+*.h5
+
+# Secrets & envs
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs & runtime
+logs/
+*.log
+
+# Docker
+.docker/
