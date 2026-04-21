@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 7 — Week 7: Broker abstraction] — 2026-04-21
+
+### Added
+- `src/quant/execution/broker_base.py` — `Broker` ABC per PRD §4.3: `get_account`, `get_positions`, `submit_order`, `get_order_status`, `get_fills`, `cancel_order`. Domain exceptions `BrokerError`, `OrderRejectedError`, `OrderNotFoundError`, `TransientBrokerError` — rejections are final, transients are retryable.
+- `src/quant/execution/paper_broker.py` — `PaperBroker`: deterministic in-memory simulator. Queue-then-fill model: `submit_order` accepts, `advance_to(next_bar_open)` fills queued orders at open ± slippage (bps). Tracks cash + per-symbol cost basis, supports shorts via position reduction past zero, commission modeled as bps of notional. Duplicate client-order-id and non-positive limit price are rejected at submit; orders with no next-bar print stay queued. `get_account()` marks positions to latest known prices for live equity reporting.
+- `src/quant/execution/alpaca_broker.py` — `AlpacaBroker`: thin wrapper over `alpaca-py`'s `TradingClient`. Translates `Account`/`Position`/`Order`/`OrderResult`/`Fill` to and from the SDK's models. Full status map across all 17 Alpaca states → our 7-state enum. Error classification splits 4xx/network failures into retryable vs non-retryable buckets by HTTP status (`_is_client_error`). `from_credentials(api_key, api_secret, paper=True)` factory for paper/live selection.
+- `src/quant/execution/order_manager.py` — `OrderManager.execute(order, wait_for_fill=False)`: stamps `submitted_at`, submits via `tenacity` exponential backoff (only retries `TransientBrokerError`, never `OrderRejectedError`), optionally polls until terminal status with a timeout, returns `OrderOutcome(order, result, final_status, fills, transitions)` with the full status-transition log.
+- `src/quant/execution/__init__.py` — re-exports the whole surface.
+- `tests/unit/test_paper_broker.py` (23 tests) — interface parity with `Broker`, accept/reject paths, slippage symmetry, cash + position accounting (buy, sell, partial sell, flip-to-short, deepen short), commission effect, limit orders (below/at/above limit, queue-on-miss for buy and sell), cancel lifecycle + idempotence on terminal states, sequential advance doesn't double-fill.
+- `tests/unit/test_order_manager.py` (10 tests) — happy-path submit, waiting for fill, timeout returns last-seen status, retry-then-success + retry-exhaustion + no-retry-on-reject, transient errors during poll recover, cancel delegation, swappable-broker parity across `PaperBroker` + a stub broker.
+- `tests/unit/test_alpaca_broker.py` (20 tests) — model translation (account, positions with zero-qty drop), request construction (market vs limit), status mapping (accepted/rejected/filled), fill synthesis from `filled_qty`/`filled_avg_price`, cancel via `cancel_order_by_id`, error classification (4xx→rejected/not-found/broker, 5xx→transient, network→transient, non-numeric code → default to transient), `from_credentials` construction.
+- `tests/integration/test_alpaca_broker.py` — live paper-API round-trip. Gated on `ALPACA_API_KEY`/`ALPACA_API_SECRET`; **skips cleanly** when unset (CI-safe). When creds present: submits 1-share buy on SPY via `OrderManager`, polls to terminal, reconciles, and flattens to leave the paper account clean. Treats `OrderRejectedError` as skip (e.g. market closed, PDT) — only the happy path asserts.
+
+### Verified
+- 226/226 tests passing (+ 1 correctly-skipped Alpaca integration without creds). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- **Coverage floor met:** `src/quant/execution/` at **100%** line + branch coverage across all four modules (broker_base, paper_broker, alpaca_broker, order_manager) — per the PRD §7.4 quality bar.
+- **Acceptance (PRD §4.3 / plan Week 7):** `test_swapping_broker_preserves_caller_flow` confirms `PaperBroker` and a stub Alpaca-shaped broker are drop-in replacements through `OrderManager` — calling code is identical between paper and live.
+
 ## [Wave 6 — Week 6: Walk-forward + Deflated Sharpe] — 2026-04-21
 
 ### Added
