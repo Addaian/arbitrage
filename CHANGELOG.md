@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 9 — Week 9: First paper deployment (local)] — 2026-04-21
+
+### Added
+- `src/quant/live/runner.py` — `_build_default_runner(broker_kind, dry_run, persist)` now picks between `PaperBroker` (local sim, zero network) and `AlpacaBroker` (paper-api.alpaca.markets via `alpaca-py`). Wires `DiscordNotifier` from `settings.discord_webhook_url` and the shared async sessionmaker from `quant.storage.db.get_sessionmaker` when `persist=True`. `OrderManager.poll_timeout` lifts to 300s for live brokers (5 min per PRD §4.2) and stays 0s for the local sim.
+- `src/quant/live/runner.py` CLI — `python -m quant.live.runner --broker {paper,alpaca-paper} [--dry-run] [--persist]`. Deprecates `--mode` in favor of `--broker`.
+- `src/quant/live/scheduler.py` CLI — `python -m quant.live.scheduler [--broker alpaca-paper] [--persist/--no-persist] [--hour 15 --minute 45 --day-of-week mon-fri]`. Builds a default runner, attaches the cron trigger, blocks on `run_forever()` with SIGINT/SIGTERM handling — the one-command 5-day daemon.
+- `scripts/review.py` — Typer/Rich daily-review dashboard. Prints: equity curve (last N days, table + unicode sparkline + cumulative pct change), latest positions, recent orders + fills, recent target signals. Exit-safe (disposes the engine on exceptions). This is the ops tool that substitutes for Grafana until Wave 18.
+- `docs/journal.md` — per-day observation template: pre-deployment checklist, daily expected/observed/anomalies sections for days 1-5, wave-exit criteria, post-run summary slot.
+- `Makefile` targets: `paper-run` (starts the scheduler against Alpaca paper, blocks), `paper-dry` (one-shot dry-run cycle), `review` (dashboard).
+- `tests/unit/test_paper_5day.py` (2 tests) — Wave 9 acceptance proxy: 5 consecutive cycles against `PaperBroker` with a recording notifier. Asserts 5 start+complete events, zero errors, equity finite and non-negative each day, drift is non-empty on cycle 1 (initial open) and **zero on cycles 2-5** (positions stay at target). Also asserts error path: empty-closes raises, notifier records "error" but never "complete".
+
+### Verified
+- 239/239 tests green (238 unit + 1 integration). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- `python -m quant.live.runner --broker paper --dry-run` and `--persist` (with Postgres up) both work end-to-end: target weights computed, orders planned, rows written to `signals` / `orders` / `positions` / `pnl_snapshots`.
+- `scripts/review.py` reads the resulting DB state and prints a coherent dashboard (verified manually against a one-shot cycle).
+- `python -m quant.live.scheduler --help` boots in &lt; 1s (deferred runner import).
+
+### Operational notes (handoff to user)
+- The actual 5-trading-day paper run is the *operational* deliverable — start it with `make paper-run` after:
+  1. `.env` populated with `ALPACA_API_KEY`, `ALPACA_API_SECRET`, and (optionally) `DISCORD_WEBHOOK_URL`
+  2. `make up` + `alembic upgrade head`
+  3. `scripts/backfill.py SPY EFA IEF SHY --years 20`
+- Each evening, run `make review` and fill in `docs/journal.md` for that day. The wave is complete when 5 trading days have logged P&L with zero unhandled exceptions and the equity curve looks sensible.
+- No code ships for Wave 10+ until the journal confirms the paper run was clean — surfacing live-vs-backtest discrepancies is the whole point.
+
 ## [Wave 8 — Week 8: LiveRunner (paper mode)] — 2026-04-21
 
 ### Added

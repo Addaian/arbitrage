@@ -1,4 +1,4 @@
-.PHONY: help install sync test test-unit test-integration cov lint format typecheck check up down db-shell clean precommit-install
+.PHONY: help install sync test test-unit test-integration cov lint format typecheck check up down db-shell clean precommit-install paper-run paper-dry review
 
 help:
 	@echo "Common targets:"
@@ -12,6 +12,9 @@ help:
 	@echo "  check            - lint + typecheck + test"
 	@echo "  up / down        - start/stop local Postgres via docker compose"
 	@echo "  precommit-install- install git hooks"
+	@echo "  paper-run        - start the scheduler against Alpaca paper (blocks)"
+	@echo "  paper-dry        - one-shot dry-run cycle against Alpaca paper"
+	@echo "  review           - print the daily-review dashboard from Postgres"
 
 install sync:
 	uv sync --extra dev
@@ -59,3 +62,14 @@ precommit-install:
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+
+# --- Paper-run operations (Wave 9) --------------------------------------
+
+paper-run:
+	uv run python -m quant.live.scheduler --broker alpaca-paper --persist
+
+paper-dry:
+	uv run python -m quant.live.runner --broker alpaca-paper --dry-run
+
+review:
+	uv run python scripts/review.py

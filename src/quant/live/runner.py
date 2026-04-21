@@ -47,12 +47,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from quant.config import get_settings
 from quant.data.cache import CacheKey, ParquetBarCache
+from quant.execution.alpaca_broker import AlpacaBroker
 from quant.execution.broker_base import Broker
 from quant.execution.order_manager import OrderManager
 from quant.execution.paper_broker import PaperBroker
 from quant.live.notifier import DiscordNotifier
 from quant.signals.base import SignalStrategy
 from quant.signals.trend import TrendSignal
+from quant.storage.db import get_sessionmaker
 from quant.storage.repos import (
     FillRepo,
     OrderRepo,
@@ -324,11 +326,21 @@ def _compute_drift(
 # --- CLI entry point ---------------------------------------------------
 
 
-def _build_default_runner(*, dry_run: bool) -> LiveRunner:
+def _build_default_runner(
+    *,
+    broker_kind: str = "paper",
+    dry_run: bool = False,
+    persist: bool = False,
+) -> LiveRunner:
     """Wire a default single-strategy runner from config + the Parquet cache.
 
-    Used by the `python -m quant.live.runner` entrypoint. Production
-    deployment should build its own runner with injected dependencies.
+    `broker_kind`:
+        - "paper"         — in-memory PaperBroker simulator (no network)
+        - "alpaca-paper"  — AlpacaBroker against paper-api.alpaca.markets;
+                            requires ALPACA_API_KEY + ALPACA_API_SECRET
+
+    `persist=True` wires Postgres persistence via the shared sessionmaker.
+    Dry-run implies no persistence regardless.
     """
     settings = get_settings()
     cache_root: Path = settings.quant_data_dir / "parquet"
@@ -365,30 +377,64 @@ def _build_default_runner(*, dry_run: bool) -> LiveRunner:
         frame = pd.concat(series.values(), axis=1).sort_index()
         return frame.ffill().dropna(how="all")
 
-    broker = PaperBroker(starting_cash=Decimal("100000"))
-    om = OrderManager(broker, poll_timeout=0.0)
+    broker: Broker
+    if broker_kind == "paper":
+        broker = PaperBroker(starting_cash=Decimal("100000"))
+    elif broker_kind == "alpaca-paper":
+        if settings.alpaca_api_key is None or settings.alpaca_api_secret is None:
+            raise ValueError(
+                "broker=alpaca-paper requires ALPACA_API_KEY and ALPACA_API_SECRET in .env"
+            )
+        broker = AlpacaBroker.from_credentials(
+            api_key=settings.alpaca_api_key.get_secret_value(),
+            api_secret=settings.alpaca_api_secret.get_secret_value(),
+            paper=True,
+        )
+    else:
+        raise ValueError(f"unknown broker kind: {broker_kind!r}")
+
+    om = OrderManager(
+        broker,
+        poll_timeout=300.0 if broker_kind != "paper" else 0.0,
+        poll_interval=2.0 if broker_kind != "paper" else 0.0,
+    )
     signal = TrendSignal(lookback_months=10, cash_symbol=cash_symbol)
+
+    webhook = (
+        str(settings.discord_webhook_url) if settings.discord_webhook_url is not None else None
+    )
+    notifier = DiscordNotifier(webhook_url=webhook)
+
+    session_factory = get_sessionmaker() if (persist and not dry_run) else None
 
     return LiveRunner(
         broker=broker,
         order_manager=om,
         signal=signal,
         closes_provider=_closes_provider,
-        session_factory=None,  # dry-run doesn't persist
+        session_factory=session_factory,
+        notifier=notifier,
         dry_run=dry_run,
     )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="quant.live.runner")
-    parser.add_argument("--mode", choices=["paper", "live"], default="paper")
-    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--broker",
+        choices=["paper", "alpaca-paper"],
+        default="paper",
+        help="paper = local in-memory sim; alpaca-paper = Alpaca paper API",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="plan only, no submits, no DB")
+    parser.add_argument(
+        "--persist", action="store_true", help="write signals/orders/fills/pnl to Postgres"
+    )
     args = parser.parse_args(argv)
-    if args.mode == "live":
-        print("live mode not wired yet; use --mode paper", file=sys.stderr)
-        return 2
 
-    runner = _build_default_runner(dry_run=args.dry_run)
+    runner = _build_default_runner(
+        broker_kind=args.broker, dry_run=args.dry_run, persist=args.persist
+    )
     result = asyncio.run(runner.run_daily_cycle())
     _print_result(result)
     return 0
