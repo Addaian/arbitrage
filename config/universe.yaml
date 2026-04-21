@@ -1,0 +1,19 @@
+name: v1
+cash_symbol: SGOV
+data_sources:
+  - yfinance
+  - alpaca
+
+# V1 ETF universe from PRD §5.2 — 10 liquid ETFs spanning equities (US/DM/EM),
+# rates (IEF/TLT), real assets (GLD/VNQ/DBC/XLE).
+symbols:
+  - SPY   # US large cap
+  - QQQ   # US tech/large cap
+  - EFA   # developed ex-US
+  - EEM   # emerging markets
+  - GLD   # gold
+  - IEF   # 7-10yr treasuries
+  - TLT   # 20+ yr treasuries
+  - VNQ   # US REITs
+  - DBC   # broad commodities
+  - XLE   # energy

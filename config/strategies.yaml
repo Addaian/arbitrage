@@ -1,0 +1,49 @@
+# Strategy allocations per PRD §5. Weights across enabled strategies sum to 1.0.
+# The remaining 15% (regime + vol target) are not separate strategies — they
+# are portfolio-level overlays applied by `src/quant/portfolio/`.
+strategies:
+  - name: trend
+    enabled: true
+    weight: 0.40
+    universe: [SPY, QQQ, EFA, IEF, TLT, SGOV]
+    params:
+      sma_lookback_months: 10
+      rebalance: monthly
+      cash_symbol: SGOV
+
+  - name: momentum
+    enabled: true
+    weight: 0.30
+    universe: [SPY, QQQ, EFA, EEM, GLD, IEF, TLT, VNQ, DBC, XLE]
+    params:
+      lookback_months: 6
+      top_n: 3
+      rebalance: monthly
+
+  - name: mean_reversion
+    enabled: true
+    weight: 0.15
+    universe: [SPY, QQQ, EFA, EEM, GLD, IEF, TLT, VNQ, DBC, XLE]
+    params:
+      ibs_entry: 0.2
+      ibs_exit: 0.7
+      rsi2_entry: 10
+      rebalance: daily
+
+  - name: regime_overlay
+    enabled: true
+    weight: 0.10
+    universe: [SPY]
+    params:
+      states: 3
+      retrain_cadence: weekly
+      stress_state_index: 2
+
+  - name: vol_target
+    enabled: true
+    weight: 0.05
+    universe: [SPY]
+    params:
+      target_annual_vol: 0.10
+      ewma_lambda: 0.94
+      max_gross_exposure: 1.0
