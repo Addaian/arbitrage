@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 8 — Week 8: LiveRunner (paper mode)] — 2026-04-21
+
+### Added
+- `src/quant/live/runner.py` — `LiveRunner.run_daily_cycle()` walks PRD §4.2 end-to-end: `closes_provider()` → `signal.target_weights()` → delta orders against current broker state → submit through `OrderManager` → reconcile → persist. Emits a `CycleResult(as_of, strategy, dry_run, target_weights, planned_orders, submitted_orders, fills_by_order, final_positions, drift, errors)`. Broker-authoritative reconciliation: `PositionRepo.replace_all` zaps ghost rows. Dry-run short-circuits before submit/persist. Single-strategy for Wave 8; combiner arrives Wave 10.
+- `src/quant/live/scheduler.py` — `CycleScheduler`: thin APScheduler wrapper. `ScheduleSpec(hour=15, minute=45, day_of_week="mon-fri", timezone="America/New_York")` matches PRD §4.2. Exception-safe wrapping around the cycle so a bad day never kills the daemon. `run_forever()` is signal-aware (SIGINT/SIGTERM) for systemd-style deployment.
+- `src/quant/live/notifier.py` — `DiscordNotifier`: `cycle_start` / `cycle_complete` / `cycle_error` hooks. No-op when webhook URL is unset (dev + CI default). Failures to post are logged, not raised — monitoring never blocks a trading cycle.
+- `src/quant/live/__init__.py` — re-exports.
+- Pure-function planner helpers: `_plan_orders(target_weights, latest_prices, current_positions, equity)` emits `PlannedOrder` deltas (with 0.001-share epsilon to skip dust trades) and `_compute_drift(...)` flags post-cycle divergence by symbol.
+- CLI: `python -m quant.live.runner --mode paper --dry-run` wires `PaperBroker` + `TrendSignal` + Parquet cache and prints a Rich tearsheet of target weights + planned orders. **Runs in 1.7s** (budget 10s) against the cached 2003-2026 history.
+- `tests/unit/test_live_runner.py` (12 tests) — planner covers buy/sell/skip-sub-share/missing-price/zero-price paths, drift detection; end-to-end dry-run vs live cycles, second-cycle drift converges to sub-share, empty closes raises, notifier receives start+complete on happy path and error on failure.
+- `tests/integration/test_live_runner.py` (1 test, runs against Dockerized Postgres) — **Wave 8 acceptance:** 3 consecutive daily cycles against `PaperBroker`, with next-bar fills between. Asserts no duplicate `client_order_id`s, no orphan fills, positions table matches broker state exactly (no ghosts), exactly 3 PnL snapshots, exactly 12 signal rows (4 symbols × 3 cycles), and drift converges to sub-share after cycle 1.
+
+### Verified
+- 237/237 tests passing (236 unit + 2 integration, of which 1 skipped without Alpaca creds). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- **Wave 8 acceptance criteria:**
+  - CLI `python -m quant.live.runner --mode paper --dry-run` completes in **1.7s** (budget 10s) and prints the target-weight + planned-order tables.
+  - 3-day paper cycle against Postgres shows **coherent state**: no duplicate orders, no ghost positions, broker ↔ DB parity on positions, one PnL row per cycle.
+
+### Notes
+- Notifier silently no-ops without `DISCORD_WEBHOOK_URL` — same unit tests run in CI and prod with or without alerting configured.
+- `wait_for_fill=True` is the default cycle mode; `OrderManager.poll_timeout` governs how long we wait before moving on. Paper broker completes in 0s (no network), so the default is fine locally; live deployments will pick a timeout ≤ 5 min per PRD §4.2.
+
 ## [Wave 7 — Week 7: Broker abstraction] — 2026-04-21
 
 ### Added

@@ -25,8 +25,8 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 7 — Broker abstraction (complete, awaiting commit)
-**Next wave:** 8 — LiveRunner (paper mode end-to-end)
+**Current wave:** 8 — LiveRunner paper mode (complete, awaiting commit)
+**Next wave:** 9 — First paper deployment (5 days running locally)
 
 ### Completed
 - **Wave 1 (Week 1)** — project scaffold, CI, smoke test
@@ -36,6 +36,7 @@ Do not run `git commit` or `git push` unless explicitly asked.
 - **Wave 5 (Week 5)** — Faber-style `TrendSignal`, daily-bar backtest engine + tearsheet, `scripts/run_backtest.py` CLI. Acceptance on SPY/EFA/IEF + SHY 2003-2026: Sharpe 0.72 vs 1/3 buy-and-hold 0.71, max DD cut -38.5% → -16.9% — canonical Faber profile. 137/137 tests green.
 - **Wave 6 (Week 6)** — walk-forward + Deflated Sharpe harness (`walk_forward`, Bailey/LdP DSR, JSONL trial log, `scripts/validate_strategy.py`). Gate 1 cleared: trend OOS Sharpe +0.60 ≥ 0.4, DSR probability 0.744, deflated excess +0.19; adversarial 3-param sweep (18 trials) correctly rejected (exit 1, deflated excess -0.05). 174/174 tests green.
 - **Wave 7 (Week 7)** — `Broker` ABC with `PaperBroker` (deterministic simulator) and `AlpacaBroker` (alpaca-py wrapper) behind a shared surface; `OrderManager` drives submit/retry/poll with tenacity. 100% coverage on `src/quant/execution/`. Live Alpaca paper round-trip test gated on creds. 226/226 tests green.
+- **Wave 8 (Week 8)** — `LiveRunner.run_daily_cycle()` walks PRD §4.2 end-to-end (signal → delta orders → submit → reconcile → persist), with `CycleScheduler` (APScheduler) and `DiscordNotifier`. Dry-run CLI runs in 1.7s (budget 10s). 3-day paper cycle against Postgres shows coherent state (no dup orders, no ghost positions, broker↔DB parity). 237/237 tests green.
 
 ### In progress
 - _none_
