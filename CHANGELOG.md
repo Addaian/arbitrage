@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 5 — Week 5: Trend strategy + backtest engine] — 2026-04-21
+
+### Added
+- `src/quant/signals/base.py` — `SignalStrategy` runtime-checkable Protocol. All strategies emit a `target_weights` matrix (dates x symbols; NaN rows = hold, numeric rows = rebalance to those percentages).
+- `src/quant/signals/trend.py` — `TrendSignal` (Faber/Antonacci GEM variant). Monthly 10-month SMA rule, equal-weighted across the risk universe, cash remainder to the configured cash symbol (SGOV/SHY). Rebalance is emitted on the **first trading day of the following month** — no look-ahead.
+- `src/quant/backtest/engine.py` — custom daily-bar multi-asset backtest. `run_backtest(closes, weights)` returns a `BacktestResult` with equity curve, daily returns, applied weights, and per-rebalance trade log. Models commission + slippage as `fees+slippage x |Δweight|`. Helpers: `closes_from_bars`, `align_on_common_dates`, `clip_to_range`. (Chose a flat dot-product path over vectorbt to pin execution order to the published Faber methodology — rationale in the module docstring.)
+- `src/quant/backtest/reports.py` — `Tearsheet` with CAGR, Sharpe, Sortino, Calmar, max DD + duration, monthly hit rate, turnover, total cost. `monthly_returns_pivot()` for the year x month heatmap.
+- `scripts/run_backtest.py` — Typer CLI: `--strategy trend --start 2003-01-01 [--end --universe --cash-symbol --lookback-months --initial-cash --fees --slippage --cache-dir]`. Loads bars from the Parquet cache (falls back to the widest-range cached file per symbol), runs the signal, prints a Rich tearsheet table.
+- `src/quant/signals/__init__.py`, `src/quant/backtest/__init__.py` — re-exports.
+- `tests/unit/test_signals_trend.py` (11 tests) — contract rejections (missing cash symbol, non-positive lookback, no risk symbols), weight-sum invariants (sum to 1 on rebalance), warmup row is all-cash, all-long in uptrend, all-cash in downtrend, mixed signal splitting, monthly rebalance cadence, first-trading-day-of-month timing.
+- `tests/unit/test_backtest_engine.py` (12 tests) — buy-and-hold equivalence, cash-flat equity, rebalance cost charging, column-mismatch rejection, empty/no-rebalance guards, tearsheet on flat equity, monthly pivot shape, bar-to-frame helpers, alignment drops, range clipping.
+
+### Verified
+- 137/137 unit tests green. Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- **Acceptance (Faber profile, SPY/EFA/IEF + SHY cash, 2003-04-21 → 2026-04-21, 10-month SMA):** CAGR +5.48%, Sharpe 0.72, Sortino 1.12, max DD **-16.87%** vs 1/3-equal buy-and-hold at CAGR +8.25%, Sharpe 0.71, max DD **-38.52%**. Sharpe parity with >50% DD reduction — the canonical Faber tradeoff.
+- **Parameter sensitivity (lookback sweep 6/9/10/12 months):** CAGR 5.48–5.90%, Sharpe 0.72–0.78. No cliff across the published Faber range — strategy is parameter-robust, not overfit to 10.
+- End-to-end CLI runtime 1.1s for 23 years x 4 symbols (budget: 30s).
+
+### Notes
+- Cash proxy: `SGOV` (default per config) only has data back to 2020. For the 2003-onward acceptance backtest we pass `--cash-symbol SHY`, which has full-history coverage and behaves identically for the rule.
+- No notebook — parameter sweeps are one-liners via the CLI. Will revisit if research intensity justifies it.
+
 ## [Wave 4 — Week 4: Feature engineering] — 2026-04-20
 
 ### Added

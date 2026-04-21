@@ -25,20 +25,21 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 4 — Feature engineering (complete, awaiting commit)
-**Next wave:** 5 — First strategy (Antonacci GEM-style trend) + vectorbt backtest
+**Current wave:** 5 — Trend strategy + backtest engine (complete, awaiting commit)
+**Next wave:** 6 — Walk-forward + Deflated Sharpe harness
 
 ### Completed
 - **Wave 1 (Week 1)** — project scaffold, CI, smoke test
 - **Wave 2 (Week 2)** — Pydantic Settings + YAML configs, shared domain types, SQLAlchemy 2.0 ORM, async psycopg3 pool, repos, Alembic initial migration (verified end-to-end against Dockerized Postgres + TimescaleDB)
 - **Wave 3 (Week 3)** — YFinance + Alpaca loaders, Parquet cache, validation pipeline, `scripts/backfill.py` CLI (cache-hit path measured at 0.8s, vs 4.9s network fetch)
 - **Wave 4 (Week 4)** — technical / cross-sectional / regime feature libraries, look-ahead-bias property test across 13 entry points, benchmark at 0.6s (budget 10s) for 10 ETFs × 20 years
+- **Wave 5 (Week 5)** — Faber-style `TrendSignal`, daily-bar backtest engine + tearsheet, `scripts/run_backtest.py` CLI. Acceptance on SPY/EFA/IEF + SHY 2003-2026: Sharpe 0.72 vs 1/3 buy-and-hold 0.71, max DD cut -38.5% → -16.9% — canonical Faber profile. 137/137 tests green.
 
 ### In progress
 - _none_
 
 ### Gate 1 approaching
-**End of Week 6:** trend strategy must pass Deflated Sharpe > 0, walk-forward OOS Sharpe ≥ 0.4. Wave 5 ships the trend signal + vectorbt engine; Wave 6 ships walk-forward + DSR harness.
+**End of Week 6:** trend strategy must pass Deflated Sharpe > 0, walk-forward OOS Sharpe ≥ 0.4. Wave 5 shipped the trend signal + backtest engine; Wave 6 ships walk-forward + DSR harness.
 
 ### Gates ahead
 - **Gate 1 (end of Week 6):** trend strategy must pass Deflated Sharpe > 0, walk-forward OOS Sharpe ≥ 0.4
