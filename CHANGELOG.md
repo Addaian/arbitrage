@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 6 — Week 6: Walk-forward + Deflated Sharpe] — 2026-04-21
+
+### Added
+- `src/quant/backtest/deflated_sharpe.py` — Bailey & Lopez de Prado (JPM 2014). `probabilistic_sharpe_ratio`, `expected_max_sharpe` (Gumbel closed-form, Euler-Mascheroni constant), `deflated_sharpe_ratio` aggregator returning `DeflatedSharpeResult(observed_sharpe, benchmark_sharpe, psr, num_trials, num_observations, skew, excess_kurtosis, passes)`. All Sharpes annualized; SE formula accounts for skewness + excess kurtosis. Pathological variance inputs degrade to PSR=0.5 rather than crashing.
+- `src/quant/backtest/walk_forward.py` — `walk_forward(closes, strategy_factory, train_years=10, test_years=2, [step_years, expanding, fees, slippage, initial_cash])`. Returns `WalkForwardResult` with per-fold `WalkForwardFold` records (train/test windows, OOS Sharpe/CAGR/maxDD, full `BacktestResult`) and a concatenated OOS return series. Helpers: `fixed_params(strategy)` (published-rule factory) and `tuned_by_train_sharpe(candidates)` (in-sample search factory — simulates selection bias for DSR deflation).
+- `src/quant/backtest/trial_log.py` — append-only trial log behind a `TrialLog` Protocol. `JsonlTrialLog(root)` writes `<strategy>.jsonl`, one line per trial (`strategy`, `params`, `params_hash`, `start/end dates`, `sharpe`, `cagr`, `max_drawdown`, `recorded_at`). Exposes `record(TrialRecord)` + `count_trials(strategy)`. Local dev default; Postgres path via existing `BacktestRunRepo`.
+- `scripts/validate_strategy.py` — Typer CLI. Runs walk-forward, records each `fold × candidate param set` as a trial, computes DSR against the accumulated trial count, prints a Rich folds-table + summary, pass/fail on `--min-oos-sharpe` (default 0.4) and `--min-dsr-psr` (default 0.5, matching the plan's "DSR > 0" semantics; pass 0.95 for the strict Lopez de Prado significance bar). `--overfit-sweep N` simulates a parameter search by running `N` candidate lookbacks per fold — surfaces selection bias.
+- `src/quant/backtest/__init__.py` — re-exports WF, DSR, and trial-log surface.
+- `tests/unit/test_deflated_sharpe.py` (18 tests) — PSR boundary cases (SR==SR* → 0.5, near 1/0 on dominance/domination, symmetry), rejections, graceful degradation on negative variance; expected-max monotonicity + √V scaling + argument validation; DSR end-to-end (strong strategy passes with 1 trial, same strategy fails under 10k trials, noise fails at 1 trial); NaN handling; `annualized_sharpe` helper.
+- `tests/unit/test_walk_forward.py` (13 tests) — fold count, OOS non-overlap (rolling), constant train length (rolling), monotone growth (expanding), zero folds on short history; end-to-end produces folds + monotone OOS curve, rejections (too-short history / empty / unsorted), `tuned_by_train_sharpe` picks a valid candidate, factory receives train slice, concatenated Sharpe is finite.
+- `tests/unit/test_trial_log.py` (6 tests) — empty fresh dir, record+count, persistence across instances, deterministic params hash, read-all round-trip, Protocol satisfaction.
+
+### Verified
+- 174/174 tests green (173 unit + 1 integration). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- **Acceptance — trend strategy, 1 trial:** walk-forward 2003-04 → 2025-04, 10y train / 2y test, 6 OOS folds. Concatenated OOS Sharpe **+0.600 ≥ 0.4**. DSR probability **0.744 > 0.5**, deflated excess **+0.192 > 0**. CLI exit 0.
+- **Acceptance — deliberately overfit variant (`--overfit-sweep 3`, 18 trials logged):** same strategy family, now selecting the best lookback per fold. Concatenated OOS Sharpe **+0.519 ≥ 0.4** (clears that gate alone), but DSR benchmark inflates to +0.571 under 18 trials, probability drops to **0.430 < 0.5**, deflated excess **-0.051 < 0** → **CLI correctly fails with exit 1**. The deflation kicks in only via trial-count accounting, which is exactly the Bailey & Lopez de Prado mechanism at work.
+- End-to-end CLI: 0.9s for 23 years × 4 symbols × 6 folds (trend, 1 trial); 1.8s for the 3-candidate sweep.
+
+### Notes
+- `--min-dsr-psr` default is **0.5** (aligns with the plan's "DSR > 0" = "deflated excess > 0"). For the stricter 95%-confidence Bailey/LdP bar, pass `--min-dsr-psr 0.95` — only strategies with much longer OOS windows or single-trial evidence tend to clear it.
+- `DeflatedSharpeResult.passes` uses the strict 0.95 threshold for library callers; CLI threshold is decoupled so operational use and research-grade claims don't collide.
+
 ## [Wave 5 — Week 5: Trend strategy + backtest engine] — 2026-04-21
 
 ### Added

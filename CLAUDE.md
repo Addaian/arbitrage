@@ -25,8 +25,8 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 5 — Trend strategy + backtest engine (complete, awaiting commit)
-**Next wave:** 6 — Walk-forward + Deflated Sharpe harness
+**Current wave:** 6 — Walk-forward + Deflated Sharpe (complete, awaiting commit)
+**Next wave:** 7 — Broker abstraction (Alpaca + Paper brokers behind a shared interface)
 
 ### Completed
 - **Wave 1 (Week 1)** — project scaffold, CI, smoke test
@@ -34,12 +34,13 @@ Do not run `git commit` or `git push` unless explicitly asked.
 - **Wave 3 (Week 3)** — YFinance + Alpaca loaders, Parquet cache, validation pipeline, `scripts/backfill.py` CLI (cache-hit path measured at 0.8s, vs 4.9s network fetch)
 - **Wave 4 (Week 4)** — technical / cross-sectional / regime feature libraries, look-ahead-bias property test across 13 entry points, benchmark at 0.6s (budget 10s) for 10 ETFs × 20 years
 - **Wave 5 (Week 5)** — Faber-style `TrendSignal`, daily-bar backtest engine + tearsheet, `scripts/run_backtest.py` CLI. Acceptance on SPY/EFA/IEF + SHY 2003-2026: Sharpe 0.72 vs 1/3 buy-and-hold 0.71, max DD cut -38.5% → -16.9% — canonical Faber profile. 137/137 tests green.
+- **Wave 6 (Week 6)** — walk-forward + Deflated Sharpe harness (`walk_forward`, Bailey/LdP DSR, JSONL trial log, `scripts/validate_strategy.py`). Gate 1 cleared: trend OOS Sharpe +0.60 ≥ 0.4, DSR probability 0.744, deflated excess +0.19; adversarial 3-param sweep (18 trials) correctly rejected (exit 1, deflated excess -0.05). 174/174 tests green.
 
 ### In progress
 - _none_
 
-### Gate 1 approaching
-**End of Week 6:** trend strategy must pass Deflated Sharpe > 0, walk-forward OOS Sharpe ≥ 0.4. Wave 5 shipped the trend signal + backtest engine; Wave 6 ships walk-forward + DSR harness.
+### Gate 1 — CLEARED
+**End of Week 6:** trend strategy passes Deflated Sharpe > 0 (deflated excess +0.19) and walk-forward OOS Sharpe ≥ 0.4 (+0.60 concatenated across 6 rolling folds). Adversarial overfit variant is rejected by the DSR harness with exit 1.
 
 ### Gates ahead
 - **Gate 1 (end of Week 6):** trend strategy must pass Deflated Sharpe > 0, walk-forward OOS Sharpe ≥ 0.4
