@@ -33,9 +33,11 @@ coverage.xml
 .ipynb_checkpoints/
 notebooks/scratch/
 
-# Data artefacts (never commit market data)
-data/
-!data/.gitkeep
+# Data artefacts (never commit market data).
+# Leading slash anchors to repo root so `src/quant/data/` is not ignored.
+# Ignore contents of /data/ but keep the directory + its .gitkeep.
+/data/*
+!/data/.gitkeep
 *.parquet
 *.feather
 *.csv

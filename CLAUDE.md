@@ -25,12 +25,13 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 2 — Config, types, Postgres schema (complete, awaiting commit)
-**Next wave:** 3 — Data loaders + Parquet cache
+**Current wave:** 3 — Data loaders + Parquet cache (complete, awaiting commit)
+**Next wave:** 4 — Feature engineering (technical + cross-sectional + regime)
 
 ### Completed
 - **Wave 1 (Week 1)** — project scaffold, CI, smoke test
-- **Wave 2 (Week 2)** — Pydantic Settings + YAML configs, shared domain types, SQLAlchemy 2.0 ORM, async psycopg3 pool, repos, Alembic initial migration
+- **Wave 2 (Week 2)** — Pydantic Settings + YAML configs, shared domain types, SQLAlchemy 2.0 ORM, async psycopg3 pool, repos, Alembic initial migration (verified end-to-end against Dockerized Postgres + TimescaleDB)
+- **Wave 3 (Week 3)** — YFinance + Alpaca loaders, Parquet cache, validation pipeline, `scripts/backfill.py` CLI (cache-hit path measured at 0.8s, vs 4.9s network fetch)
 
 ### In progress
 - _none_

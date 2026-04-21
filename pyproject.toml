@@ -45,6 +45,7 @@ dependencies = [
     "psycopg[binary,pool]>=3.2",
     "sqlalchemy>=2.0",
     "alembic>=1.13",
+    "greenlet>=3.0",  # required by sqlalchemy async; not auto-pulled on some platforms
 
     # Scheduling
     "APScheduler>=3.10",

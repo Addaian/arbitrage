@@ -16,6 +16,9 @@ help:
 install sync:
 	uv sync --extra dev
 
+# Everything below assumes `sync` has been run. If you hit "command not found"
+# errors for pytest/mypy/ruff, run `make sync` first.
+
 test test-unit:
 	uv run pytest tests/unit -v
 

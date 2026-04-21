@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 3 — Week 3: Data loaders + Parquet cache] — 2026-04-20
+
+### Added
+- `src/quant/data/pipeline.py` — `validate_bars()` drops duplicates and zero/negative volume rows, returns `ValidationReport` with drop-rate metric. `require_adjusted()` refuses unadjusted bars. `bars_from_ohlcv_frame()` converts pandas OHLCV DataFrames to `list[Bar]` with NaN + OHLC-violation filtering.
+- `src/quant/data/cache.py` — `ParquetBarCache` + `CacheKey(symbol, start, end)`. Layout: `<root>/<symbol>/<start>_<end>.parquet`. Zstd compression. Decimal prices stored as strings for exact round-trip.
+- `src/quant/data/loaders.py` — `BarLoader` runtime-checkable Protocol, `YFinanceLoader` (auto-adjusted EOD), `AlpacaLoader` (`adjustment=ALL`, IEX feed by default). Shared tenacity retry policy (3 attempts, exponential 1s→10s, transient IO errors only).
+- `scripts/backfill.py` — Typer CLI. `backfill SPY QQQ --years 20 --source yfinance [--write-db] [--force]`. Rich progress table, cache-hit reporting.
+- `src/quant/data/__init__.py` — re-exports loaders, cache, and pipeline helpers.
+- `tests/unit/test_data_pipeline.py` (9 tests) — duplicate handling, zero-volume drop, drop-rate calc, adjusted-guard, frame→bar conversion + edge cases (NaN, OHLC violations, missing columns).
+- `tests/unit/test_data_cache.py` (5 tests) — put/get round-trip, missing-key returns None, invalidate idempotency, cache-hit short-circuits loader, deterministic file path.
+- `tests/unit/test_data_loaders.py` (6 tests) — Protocol runtime check (positive + negative), retry retries on ConnectionError, retry gives up after budget, retry ignores non-retryable errors, Decimal precision preserved through frame conversion.
+
+### Changed
+- `pyproject.toml` — added `greenlet>=3.0` (required by SQLAlchemy async; wasn't pulled transitively on macOS).
+- `Makefile` — added comment pointing users to `make sync` when tool binaries are missing.
+- `migrations/env.py` — keep `postgresql+psycopg://` URL so Alembic uses psycopg3 instead of falling back to psycopg2.
+
+### Verified
+- `backfill SPY QQQ --years 2`: first run (network) 4.9s, second run (cache) 0.8s — acceptance criterion <5s.
+- `backfill SPY --years 1 --write-db`: 256 bars round-tripped yfinance → validate → Parquet → Postgres.
+- 61/61 unit tests green, ruff clean, ruff format clean, mypy strict clean on risk/execution/portfolio.
+- 1/1 integration test green (Alembic up → upsert Bar → read back → downgrade).
+
 ## [Wave 2 — Week 2: Config, types, Postgres] — 2026-04-20
 
 ### Added
