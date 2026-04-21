@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 4 — Week 4: Feature engineering] — 2026-04-20
+
+### Added
+- `src/quant/features/technical.py` — `returns`, `log_returns`, `sma`, `ema`, `rsi` (Wilder smoothing), `ibs`, `atr`, `rolling_vol` (annualized), `ewma_vol` (RiskMetrics, for vol-target overlay), and `compute_technical_features` aggregator with canonical column naming (`close_sma_20`, `rsi_14`, etc.).
+- `src/quant/features/cross_sectional.py` — `rank_cross_sectional` (percentile or ordinal), `top_n_mask`, `zscore_cross_sectional`, `demean_cross_sectional`, `universe_momentum` (lookback + optional skip-days).
+- `src/quant/features/regime.py` — `vix_log_level`, `vix_percentile` (rolling rank), `term_structure_ratio`, `compute_regime_features` aggregator feeding the HMM overlay.
+- `src/quant/features/__init__.py` — re-exports of the whole feature surface.
+- `src/quant/data/pipeline.py` — added `bars_to_frame(list[Bar]) -> pd.DataFrame` (float-valued, inverse of `bars_from_ohlcv_frame`).
+- `tests/unit/test_features_technical.py` (15 tests) — per-indicator coverage + aggregator shape/index preservation.
+- `tests/unit/test_features_cross_sectional.py` (9 tests) — ordering, ties, zero-variance rows, momentum windows.
+- `tests/unit/test_features_regime.py` (10 tests) — VIX transforms, percentile warmup, term-structure sign convention.
+- `tests/unit/test_no_lookahead.py` (13 tests) — **property-style look-ahead guard**: every feature function satisfies `fn(shift(x)) == shift(fn(x))`. Parameterized across returns, log_returns, sma, ema, rsi, rolling_vol, ewma_vol, vix_log, vix_percentile, plus ibs/atr/aggregator/cross-sectional/regime-bundle.
+- `tests/unit/test_features_benchmark.py` — `slow`-marked performance guard; **0.6s** to compute the full Week-4 feature surface on 10 synthetic ETFs × 20 years (budget was 10s).
+
+### Verified
+- 113/113 unit tests green (including benchmark). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- No-look-ahead invariant holds across all 13 feature entry points.
+
 ## [Wave 3 — Week 3: Data loaders + Parquet cache] — 2026-04-20
 
 ### Added

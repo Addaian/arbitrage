@@ -25,16 +25,20 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 3 — Data loaders + Parquet cache (complete, awaiting commit)
-**Next wave:** 4 — Feature engineering (technical + cross-sectional + regime)
+**Current wave:** 4 — Feature engineering (complete, awaiting commit)
+**Next wave:** 5 — First strategy (Antonacci GEM-style trend) + vectorbt backtest
 
 ### Completed
 - **Wave 1 (Week 1)** — project scaffold, CI, smoke test
 - **Wave 2 (Week 2)** — Pydantic Settings + YAML configs, shared domain types, SQLAlchemy 2.0 ORM, async psycopg3 pool, repos, Alembic initial migration (verified end-to-end against Dockerized Postgres + TimescaleDB)
 - **Wave 3 (Week 3)** — YFinance + Alpaca loaders, Parquet cache, validation pipeline, `scripts/backfill.py` CLI (cache-hit path measured at 0.8s, vs 4.9s network fetch)
+- **Wave 4 (Week 4)** — technical / cross-sectional / regime feature libraries, look-ahead-bias property test across 13 entry points, benchmark at 0.6s (budget 10s) for 10 ETFs × 20 years
 
 ### In progress
 - _none_
+
+### Gate 1 approaching
+**End of Week 6:** trend strategy must pass Deflated Sharpe > 0, walk-forward OOS Sharpe ≥ 0.4. Wave 5 ships the trend signal + vectorbt engine; Wave 6 ships walk-forward + DSR harness.
 
 ### Gates ahead
 - **Gate 1 (end of Week 6):** trend strategy must pass Deflated Sharpe > 0, walk-forward OOS Sharpe ≥ 0.4
