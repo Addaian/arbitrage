@@ -25,14 +25,15 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 1 — Project scaffold (in progress)
-**Next wave:** 2 — Config, types, Postgres schema
+**Current wave:** 2 — Config, types, Postgres schema (complete, awaiting commit)
+**Next wave:** 3 — Data loaders + Parquet cache
 
 ### Completed
-- _nothing yet_
+- **Wave 1 (Week 1)** — project scaffold, CI, smoke test
+- **Wave 2 (Week 2)** — Pydantic Settings + YAML configs, shared domain types, SQLAlchemy 2.0 ORM, async psycopg3 pool, repos, Alembic initial migration
 
 ### In progress
-- Wave 1 (Week 1): project scaffold, CI, smoke test
+- _none_
 
 ### Gates ahead
 - **Gate 1 (end of Week 6):** trend strategy must pass Deflated Sharpe > 0, walk-forward OOS Sharpe ≥ 0.4

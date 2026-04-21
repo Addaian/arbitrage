@@ -10,6 +10,8 @@ import importlib
 
 import pytest
 
+import quant
+
 SUBMODULES: list[str] = [
     "quant",
     "quant.config",
@@ -35,7 +37,5 @@ def test_submodule_importable(name: str) -> None:
 
 
 def test_package_version_is_set() -> None:
-    import quant
-
     assert isinstance(quant.__version__, str)
     assert quant.__version__
