@@ -25,8 +25,8 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 9 — First paper deployment infra (complete, awaiting commit + operational run)
-**Next wave:** 10 — Cross-sectional momentum (second strategy)
+**Current wave:** 10 — Cross-sectional momentum (complete, awaiting commit)
+**Next wave:** 11 — Mean reversion overlay (third strategy)
 
 ### Completed
 - **Wave 1 (Week 1)** — project scaffold, CI, smoke test
@@ -38,6 +38,7 @@ Do not run `git commit` or `git push` unless explicitly asked.
 - **Wave 7 (Week 7)** — `Broker` ABC with `PaperBroker` (deterministic simulator) and `AlpacaBroker` (alpaca-py wrapper) behind a shared surface; `OrderManager` drives submit/retry/poll with tenacity. 100% coverage on `src/quant/execution/`. Live Alpaca paper round-trip test gated on creds. 226/226 tests green.
 - **Wave 8 (Week 8)** — `LiveRunner.run_daily_cycle()` walks PRD §4.2 end-to-end (signal → delta orders → submit → reconcile → persist), with `CycleScheduler` (APScheduler) and `DiscordNotifier`. Dry-run CLI runs in 1.7s (budget 10s). 3-day paper cycle against Postgres shows coherent state (no dup orders, no ghost positions, broker↔DB parity). 237/237 tests green.
 - **Wave 9 (Week 9)** — paper-deployment infra: `python -m quant.live.scheduler --broker alpaca-paper --persist` is the 5-day daemon; `make paper-run` / `make paper-dry` / `make review` wrap it. `scripts/review.py` prints equity curve + positions + orders + signals from Postgres. 5-day simulated cycle test proves zero errors and drift convergence. `docs/journal.md` is the per-day log. 239/239 tests green. **Operational handoff:** user runs `make paper-run` for 5 trading days and fills in `docs/journal.md` before Wave 10.
+- **Wave 10 (Week 10)** — `MomentumSignal` (6mo rank, top-3, monthly rebalance) + `portfolio.combine_weights`. Momentum passes Wave 6 validation (OOS Sharpe +0.77, DSR PSR 0.85, deflated excess +0.34). Combined trend+momentum (4/7, 3/7) Sharpe 0.730 > both alone but 1.094x best-single misses the 1.10 target by 0.6pp; correlation 0.66 misses the <0.5 target. Both shortfalls flagged for Week 13 research sprint — the mechanism is tested and correct; the structural decorrelation is what regime overlay (W15) + vol targeting (W16) address. 262/262 tests green.
 
 ### In progress
 - _none_

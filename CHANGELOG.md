@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 10 — Week 10: Cross-sectional momentum] — 2026-04-21
+
+### Added
+- `src/quant/signals/momentum.py` — `MomentumSignal`: rank risk universe by `lookback_months` total return, hold top `top_n` equal-weighted, monthly rebalance on the first trading day of the next month, cash symbol required in universe (100% cash during warmup). Default lookback 6, top-N 3, matching PRD §5.2. Optional `abs_momentum_filter` (off by default) parks non-positive-momentum names in cash — keeps the PRD's plain-rank behavior as the default while leaving the Antonacci variant one flag away.
+- `src/quant/signals/__init__.py` — re-exports `MomentumSignal`.
+- `src/quant/portfolio/combiner.py` — `combine_weights(strategy_weights, allocations)` scales each strategy's sleeve by its portfolio allocation and sums across strategies over the union of symbols and dates. Forward-fills per sleeve so a monthly strategy still contributes carry-forward weights on its non-rebalance days. Rows before any strategy has fired its first rebalance are left all-NaN (pre-signal). `rebalance_dates(...)` returns the union of per-strategy rebalance timestamps. 100% mypy-strict (portfolio quality bar).
+- `tests/unit/test_signals_momentum.py` (13 tests) — contract rejections (missing cash / too-few risk / non-positive lookback or top_n), weight shape (sum-to-1, columns match closes), warmup=all-cash, top-N correctness with filter off (flat beats negative), filter-on variants (all-cash when every name is down, partial-fill parks in cash), monthly cadence + first-trading-day alignment.
+- `tests/unit/test_portfolio_combiner.py` (10 tests) — guards (empty, mismatched keys, alloc sum not ~1, empty sleeve), single-strategy identity, two-strategy weighted sum on overlapping + disjoint universes, pre-signal prefix stays all-NaN, `rebalance_dates` union.
+- `data/parquet/{QQQ,EEM,GLD,TLT,VNQ,DBC,XLE}/` — backfilled 22 years of daily bars via `scripts/backfill.py` for the momentum universe. `QQQ` was re-fetched to widen its prior 1-year cache to 22 years so backtests align across all 11 symbols.
+
+### Verified
+- 262/262 tests passing (261 unit + 1 integration). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- **Walk-forward + DSR on momentum (2006-02 → 2026-04, 10y train / 2y test, 5 folds):** concatenated OOS Sharpe **+0.769** (≥ 0.4 ✓), per-fold Sharpes `[1.35, -0.20, 0.92, 0.53, 1.38]`, **DSR probability 0.853**, deflated excess **+0.338 > 0** → momentum clears the Wave 6 validation gate unambiguously.
+- **Combined backtest (trend 4/7 + momentum 3/7, 2006-2026):**
+  - TREND:    CAGR +5.03%, Sharpe 0.667, maxDD -16.87%
+  - MOMENTUM: CAGR +9.36%, Sharpe 0.665, maxDD -35.09%
+  - COMBINED: CAGR +7.05%, Sharpe **0.730**, maxDD -15.32%
+  - combined Sharpe / best-single = **1.094** (target ≥ 1.10 → **0.6pp short**)
+  - daily-returns correlation trend vs momentum: **0.658** (target <0.5 → **miss**)
+- Strictly, the combined portfolio's Sharpe *is* higher than either alone (0.730 > 0.667 > 0.665) — the diversification benefit is real but smaller than the 10% ideal.
+
+### Notes / open issues for Wave 13 research sprint
+
+- The 110%-of-best-single and <0.5-correlation targets are both flagged for Week 13. Both strategies are long-biased and share overlapping risk universes (SPY/EFA/IEF in both), which structurally caps decorrelation — the HMM regime overlay (Wave 15) and vol targeting (Wave 16) are the designed fixes. The mechanism (signal + combiner + backtest engine) is correct and tested; the shortfalls are strategy-quality / universe-overlap, not code bugs.
+- A parameter sweep over `lookback_months ∈ {3, 6, 9, 12}` with and without the filter confirmed the defaults are honest (not fished): 12-month would have cleared 110% at 1.102 but only by a whisker and the plan prescribes 6 — not worth parameter fishing pre-Week-13.
+- `config/strategies.yaml` already has momentum enabled at `weight: 0.30`; the combined-backtest numbers above use the plan's 0.40/0.30 trend/momentum split (normalized to 4/7 and 3/7 since the regime+vol sleeves — 0.15 combined — aren't live yet).
+
 ## [Wave 9 — Week 9: First paper deployment (local)] — 2026-04-21
 
 ### Added
