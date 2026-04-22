@@ -176,6 +176,15 @@ def record_killswitch_state(engaged: bool) -> None:
     g.set(1 if engaged else 0)  # type: ignore[attr-defined]
 
 
+def record_rolling_sharpe(sharpe: float, daily_return: float) -> None:
+    """Set the rolling-30-day Sharpe gauge and the per-cycle daily-return
+    gauge. Called from `LiveRunner` on success so the dashboard's Sharpe
+    panel has a value for the 30-day paper qualifier.
+    """
+    metric("rolling_30d_sharpe").set(sharpe)  # type: ignore[attr-defined]
+    metric("daily_return").set(daily_return)  # type: ignore[attr-defined]
+
+
 def record_order_submit(*, strategy: str, side: str, result: str, latency_seconds: float) -> None:
     counter = metric("order_submit_total")
     counter.labels(strategy=strategy, side=side, result=result).inc()  # type: ignore[attr-defined]

@@ -42,10 +42,13 @@ from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
+from loguru import logger
 from rich.console import Console
 from rich.table import Table
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from quant.backtest.deflated_sharpe import annualized_sharpe
 from quant.config import get_settings
 from quant.data.cache import CacheKey, ParquetBarCache
 from quant.execution.alpaca_broker import AlpacaBroker
@@ -57,6 +60,7 @@ from quant.monitoring.metrics import (
     record_cycle_error,
     record_cycle_success,
     record_killswitch_state,
+    record_rolling_sharpe,
     set_position_values,
 )
 from quant.monitoring.sentry import capture_cycle_exception
@@ -64,6 +68,7 @@ from quant.risk.killswitch import Killswitch
 from quant.signals.base import SignalStrategy
 from quant.signals.trend import TrendSignal
 from quant.storage.db import get_sessionmaker
+from quant.storage.models import PnlSnapshotORM
 from quant.storage.repos import (
     FillRepo,
     OrderRepo,
@@ -243,6 +248,10 @@ class LiveRunner:
             set_position_values(
                 {p.symbol: float(p.market_value) for p in result.final_positions if p.qty != 0}
             )
+            # Rolling 30d Sharpe — depends on the PnL history we just
+            # wrote in _persist, so only emit when DB persistence ran.
+            if self._session_factory is not None:
+                await self._emit_rolling_sharpe()
 
             self._notifier.cycle_complete(strategy_name, result)
             return result
@@ -253,6 +262,43 @@ class LiveRunner:
             msg = f"cycle failed: {exc}"
             self._notifier.cycle_error(strategy_name, msg)
             raise
+
+    async def _emit_rolling_sharpe(self) -> None:
+        """Load the last ~40 days of PnL snapshots, compute the trailing
+        30d daily-return series, and emit `quant_rolling_30d_sharpe` +
+        `quant_daily_return`.
+
+        Best-effort: any DB exception is logged and swallowed — a
+        monitoring miss must never fail the cycle. Needs at least 2
+        snapshots to compute a daily return; returns silently otherwise.
+        """
+        assert self._session_factory is not None
+        try:
+            async with self._session_factory() as session:
+                stmt = (
+                    select(PnlSnapshotORM.ts, PnlSnapshotORM.equity)
+                    .order_by(desc(PnlSnapshotORM.ts))
+                    .limit(40)
+                )
+                rows = (await session.execute(stmt)).all()
+        except Exception as exc:  # pragma: no cover — infra transient
+            logger.warning("rolling-sharpe emit failed: {}", exc)
+            return
+
+        if len(rows) < 2:
+            return
+        # rows come newest-first; reverse to chronological.
+        rows = list(reversed(rows))
+        equities = pd.Series(
+            [float(r.equity) for r in rows],
+            index=pd.DatetimeIndex([r.ts for r in rows]),
+        )
+        daily_returns = equities.pct_change().dropna()
+        if daily_returns.empty:
+            return
+        sharpe = annualized_sharpe(daily_returns.tail(30))
+        latest_return = float(daily_returns.iloc[-1])
+        record_rolling_sharpe(sharpe=sharpe, daily_return=latest_return)
 
     async def _flatten_cycle(self, *, now: datetime, strategy_name: str) -> CycleResult:
         """Kill-switch response: sell every open position at market and

@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 19 — Week 19: Final pre-live checks] — 2026-04-22
+
+### Added
+
+**Python:**
+- `src/quant/monitoring/metrics.py` — `record_rolling_sharpe(sharpe, daily_return)` closes the Wave-18 follow-up. Writes to `quant_rolling_30d_sharpe` + `quant_daily_return` gauges so the Grafana dashboard's rolling-Sharpe stat panel has data.
+- `src/quant/live/runner.py` — new `_emit_rolling_sharpe()` helper. On the success path, after `_persist` writes the current cycle's `pnl_snapshots` row, the runner pulls the last 40 equity snapshots, computes daily returns, and emits trailing-30d annualized Sharpe + today's return. Best-effort: any DB hiccup is logged at WARNING and the cycle continues (monitoring must never fail the cycle).
+
+**CLI:**
+- `scripts/paper_vs_backtest.py` — Gate 3 paper-qualifier analysis. Loads the last N days (default 30) of `pnl_snapshots` from Postgres, runs the same 3-strategy combined backtest over the same window at Alpaca ETF cost profile (0bp + 3bp slip), computes both Sharpes and tracking error `|paper - backtest| / |backtest|`. Exits 0 if tracking error < 50% (plan's Gate 3 threshold), 1 otherwise. Pure `compute_tracking_error(paper, backtest)` function exposed for testing.
+
+**Docs:**
+- `docs/disaster_recovery.md` — step-by-step runbook for three failure modes: full VPS loss (<45min RTO), Postgres-only loss (<15min), runner wedged but VPS healthy (<5min). Covers snapshot+`bootstrap.sh` recovery, `pg_dump`/`pg_restore` flow, reconciliation before re-enabling the timer, and a "pre-flight" checklist of standing behaviours (snapshot cadence, DB dump rotation, secret backup, SSH key backup). Target RTO per plan: under 1 hour total.
+- `docs/go_live_checklist.md` — printable, sign-off-able Gate 3 / pre-Wave-20 checklist. Sections A–I covering: paper tracking error, alert review, DR drill, kill-switch drill, broker/tax/admin (KYC, beneficiary, 1099-B, separate live API keys), observability sanity (Prometheus scrape + Grafana panels + Alertmanager→Discord test + Sentry test), codebase sanity (`make check` + CI green), historical gates clearance, printable sign/date fields at the bottom.
+
+**Tests:**
+- `tests/unit/test_wave19_pre_live.py` (13 tests) — rolling-Sharpe gauge emission (basic, negative, gauge overwrite semantics); `compute_tracking_error` math (basic, zero-backtest fallback, sign-symmetry); go-live checklist structure (exists, covers every plan Week 19 task, references Gates 1-3, has printable sign-off fields); DR runbook structure (exists, covers all 3 scenarios, references `bootstrap.sh` + `pg_dump` + `docker compose`).
+
+### Verified
+- **444/444 tests passing** (+1 skipped doc test). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- Wave 18 follow-up (`quant_rolling_30d_sharpe` emission) is now closed — the metric flows into Grafana every successful cycle when the DB session factory is wired.
+
+### Operational handoff — Gate 3 evaluation
+
+Nothing about the Gate 3 decision itself is automatable; the plan explicitly wants a *printed* checklist signed/dated by the operator. The user's sequence:
+
+1. Let the 30-day paper qualifier clock (started in Wave 18) complete.
+2. On the last day of the window, run:
+   ```bash
+   uv run python scripts/paper_vs_backtest.py --days 30
+   ```
+   Record the numbers into `docs/go_live_checklist.md` section A.
+3. Rehearse **Scenario 1** of `docs/disaster_recovery.md` against a scratch Hetzner VPS. Time it. Anything > 60 min is a bug in `bootstrap.sh` for this wave to close before go-live.
+4. Run the kill-switch drill against the paper account (Section D).
+5. Complete KYC / fund live account / set beneficiary (Section E). Operational work, not scripted.
+6. Walk down every remaining item in the checklist.
+7. Sign + date + **print**. Staple the printed copy next to the keyboard.
+
+If any Gate 3 item fails, extend paper by 30 days and re-run the checklist. Per the plan: *"do not go live with unresolved issues"*.
+
+### Notes
+
+- `paper_vs_backtest.py` constructs the 3-strategy combined backtest with the current allocations from `config/strategies.yaml` normalized to the live sleeves (0.47 / 0.35 / 0.18). If those allocations change between Wave 18 and Wave 19, regenerate baseline expectations; the tracking-error comparison is only meaningful against the same allocation that's running in paper.
+- The rolling-Sharpe gauge uses a simple 30-observation window on whatever cadence the runner produces snapshots (one per trading day). Weekends and holidays pass through as gaps; the window is measured in observations, not calendar days.
+- The DR runbook deliberately leaves multi-region failover / hot-standby Postgres / WAL archiving as V2 concerns. At €3/mo VPS + 10% target capital, an hour of downtime costs less than the infrastructure to prevent it.
+
 ## [Wave 18 — Week 18: Monitoring + 30-day paper qualifier] — 2026-04-22
 
 ### Added
