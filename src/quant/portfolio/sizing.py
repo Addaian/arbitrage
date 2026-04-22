@@ -5,9 +5,11 @@ Wave 15 — **regime multiplier**. Given a stress-probability series
 `1 - p_stress`, clamped to `[0, 1]`. Apply this to a combined
 target-weights frame to dial exposure down during stress regimes.
 
-Wave 16 — **vol targeting** will add a second overlay here (scale to
-target realized vol). Both overlays are multiplicative scalars on
-portfolio weights, composed on the caller's side.
+Wave 16 — **vol targeting**. `vol_target_multiplier` scales gross
+exposure by `target_vol / forecast_vol`, capped at `max_gross_exposure`
+(default 1.0 — no leverage). Composes with the regime overlay
+multiplicatively on the caller side: just compute each series, multiply
+them element-wise, and hand the product to `apply_regime_overlay`.
 
 Invariants:
     - Input weights sum to ≤ 1 on rebalance rows (cash = 1 - Σ risk).
@@ -74,6 +76,34 @@ def regime_weighted_multiplier(
     assert isinstance(mult, pd.Series)
     mult = mult.clip(lower=0.0, upper=1.0)
     mult.name = "regime_weighted_multiplier"
+    return mult
+
+
+def vol_target_multiplier(
+    forecast_vol: pd.Series,
+    *,
+    target_vol: float = 0.10,
+    max_gross_exposure: float = 1.0,
+) -> pd.Series:
+    """Scale gross exposure to a target realized vol.
+
+    `forecast_vol` is an annualized vol forecast per date (e.g. from
+    `EWMAVolForecaster` / `forecast_vol_series`). The multiplier is
+    `target_vol / forecast_vol`, clipped to `[0, max_gross_exposure]`.
+
+    Rows where `forecast_vol` is NaN or ≤ 0 are returned as NaN so
+    `apply_regime_overlay` can forward-fill from the last valid value.
+    """
+    if not 0.0 < target_vol < 5.0:
+        raise ValueError(f"target_vol must be in (0, 5), got {target_vol}")
+    if max_gross_exposure <= 0.0:
+        raise ValueError(f"max_gross_exposure must be positive, got {max_gross_exposure}")
+    if forecast_vol.empty:
+        return forecast_vol.copy()
+
+    safe = forecast_vol.where(forecast_vol > 0.0)
+    mult = (target_vol / safe).clip(lower=0.0, upper=max_gross_exposure)
+    mult.name = "vol_target_multiplier"
     return mult
 
 

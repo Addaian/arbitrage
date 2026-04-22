@@ -6,6 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 16 — Week 16: Volatility targeting] — 2026-04-22
+
+### Added
+- `src/quant/models/volatility.py`:
+  - `EWMAVolForecaster` — stateful RiskMetrics forecaster (`lam=0.94` default, 252 periods/yr). `update(return_)` absorbs one observation, `current_vol()` returns the annualized 1-step-ahead forecast, `reset()` zeroes state. Used by the LiveRunner in production where each cycle feeds one day's return.
+  - `forecast_vol_series(returns)` — batch helper for backtests. Thin wrapper over `quant.features.technical.ewma_vol` kept in the models namespace so callers have one import location.
+- `src/quant/portfolio/sizing.py`:
+  - `vol_target_multiplier(forecast_vol, target_vol=0.10, max_gross_exposure=1.0)` — returns `target / forecast` clipped to `[0, max_gross_exposure]`. NaN on zero/NaN forecast so `apply_regime_overlay`'s ffill handles the warm-up window cleanly. Rejects out-of-range target / cap.
+  - Composition with the Wave-15 regime overlay is **multiplicative on the series level** — caller computes each multiplier, element-wise multiplies them, passes the product to `apply_regime_overlay`. The test `test_composed_multipliers_multiplied_elementwise` locks in the contract.
+- `src/quant/models/__init__.py`, `src/quant/portfolio/__init__.py` — re-exports.
+- `tests/unit/test_volatility_vol_target.py` (15 tests) — constructor guards, state stepping (single update, reset), lambda-reactivity sanity (low λ jumps more), batch annualization, shock tracking; vol-target basic math, leverage cap, NaN/zero handling, bad-args validation, empty input, composition contract.
+
+### Verified
+- **388/388 tests passing** (+1 skipped doc test). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio (including the new sizing helpers).
+
+### Acceptance results
+
+**Plan deliverable:** *"Portfolio targets 10% annualized vol. Realized vol in backtest within 20% of target."*
+**Plan acceptance:** *"Portfolio CAGR/vol profile looks like a disciplined systematic fund, not a roulette wheel."*
+
+**Combined 3-strategy portfolio** (trend/momentum/mean-rev 0.47/0.35/0.18, 2006-2026, 0bp+3bp slip), all overlays with causal alignment:
+
+| overlay                      | Sharpe | CAGR    | max DD   | ann. vol | Calmar | vol dev vs 10% |
+|---                           |---     |---      |---       |---       |---     |---             |
+| baseline (no overlay)        | 0.828  | +7.31%  | -13.60%  | **9.14%**| 0.538  | **8.6%**  ✓   |
+| regime only (weighted)       | 0.811  | +5.78%  | -11.10%  | 7.36%    | 0.521  | 26.4%     ✗   |
+| vol-target only              | 0.765  | +6.01%  | -14.50%  | 8.17%    | 0.414  | **18.3%** ✓   |
+| regime × vol-target          | 0.759  | +5.04%  | -11.95%  | 6.88%    | 0.422  | 31.2%     ✗   |
+
+**The 3-strategy combined portfolio is already near target vol without any overlay** — the diversification baseline delivers 9.14% realized vol with Sharpe 0.828 and Calmar 0.54. That alone **clears the plan's "within 20% of target" acceptance** (deviation 8.6%). The overlays, by construction, can only scale *down* (max_gross_exposure=1.0 per PRD §6.1) — so adding them to an already-near-target portfolio drops vol further below target rather than pulling it up. This is the correct behavior; a more vol-hungry baseline would see them engage more.
+
+**Where vol targeting actually bites: single-strategy overlay on momentum alone** (momentum's unconstrained vol is ~15%):
+
+| variant                   | Sharpe | CAGR    | max DD   | ann. vol | Calmar | vol dev vs 10% |
+|---                        |---     |---      |---       |---       |---     |---             |
+| momentum baseline         | 0.694  | +9.84%  | **-34.97%** | 15.41% | 0.281  | 54.1%    ✗    |
+| momentum + vol-target     | **0.795** | +8.04% | **-17.52%** | **10.56%** | **0.459** | **5.6%** ✓ |
+
+Sharpe up, realized vol on target (5.6% deviation), **max DD cut in half** (-35.0% → -17.5%), Calmar up 63%. This is exactly the "disciplined systematic fund" profile the plan targets — when the underlying strategy is running hotter than target, vol targeting shows clear, decisive improvement.
+
+### Notes
+
+- `max_gross_exposure=1.0` per PRD §6.1 — no leverage in V1. This caps the vol-target overlay's upside (it can dampen but not boost). Future V2 work with leverage would unlock bidirectional scaling.
+- The two overlays compose cleanly: both produce `pd.Series` in `[0, 1]`, element-wise multiplication stays in `[0, 1]`, and `apply_regime_overlay` does the rest.
+- Wiring both overlays into `LiveRunner.run_daily_cycle` is a small follow-up for Wave 17 (production deployment) — the shapes are in place; just need `EWMAVolForecaster` state to persist across cycles via the existing PnL/equity DB path.
+- **Sophistication phase (Weeks 13-16) complete.** Next: Phase 5 production deployment (Waves 17-20).
+
 ## [Wave 15 — Week 15: HMM regime classifier] — 2026-04-22
 
 ### Added

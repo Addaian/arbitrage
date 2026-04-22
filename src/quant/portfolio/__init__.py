@@ -5,6 +5,7 @@ from quant.portfolio.sizing import (
     apply_regime_overlay,
     regime_multiplier,
     regime_weighted_multiplier,
+    vol_target_multiplier,
 )
 
 __all__ = [
@@ -13,4 +14,5 @@ __all__ = [
     "rebalance_dates",
     "regime_multiplier",
     "regime_weighted_multiplier",
+    "vol_target_multiplier",
 ]
