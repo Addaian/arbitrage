@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 14 — Week 14: Walk-forward harness refinement] — 2026-04-22
+
+### Added
+- `scripts/validate_new_strategy.py` — generic strategy validator. Takes a Python import path (`module:ClassName`), JSON params, universe, cash symbol. Runs backtest + WF+DSR + stress + regime evaluation. Writes a markdown report to `docs/strategies/<name>.md`. Returns exit 0 on pass / 1 on fail, so CI can gate on it. `--ohlc` flag handles signals (mean-reversion) that need highs+lows alongside closes. Gates: OOS Sharpe ≥ 0.4, DSR PSR > 0.5, no stress window Sharpe below -2.5, positive Sharpe in ≥ 2 of 3 vol regimes.
+- `scripts/check_strategy_artifacts.py` — CI enforcement script. Reads changed files (from `git diff --name-only <base>...HEAD` or stdin). Fails with exit 1 if any `src/quant/signals/*.py` (excluding `__init__.py` and `base.py`) changed without a corresponding `docs/strategies/*.md` being added or updated.
+- `.github/workflows/ci.yml` — new `strategy-artifact-gate` job. Runs on pull_request only. Does a shallow `git fetch` (full history) and invokes the artifact-presence check against the PR's base branch.
+- `docs/strategy_template.md` — human-authored skeleton (Hypothesis / Theory / Universe / Parameters / Known risks) + auto-generated section stubs filled by the validator.
+- `docs/strategies/trend.md`, `docs/strategies/momentum.md`, `docs/strategies/mean_reversion.md` — fresh validation artifacts for all 3 surviving Wave-13 strategies, generated from the new CLI.
+- `tests/unit/test_wave14_acceptance.py` (6 tests, 1 skipped) — subprocess-driven acceptance tests:
+  - Generic CLI rejects a deliberately bad strategy (inverse momentum — holds the bottom-ranked N assets). Verifies exit 1 + FAIL verdict + at least one crossed-out gate in the generated markdown.
+  - CI gate rejects signal-only diff, accepts signal+doc pair, ignores exempt files (`__init__.py`, `base.py`), ignores unrelated file changes, handles empty diff.
+
+### Verified
+- **349/349 tests passing** (+1 skipped documentation test). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- Adding a new strategy is now a 3-step flow: write the signal class under `src/quant/signals/`, run `scripts/validate_new_strategy.py`, attach the generated `docs/strategies/<name>.md` to the PR.
+- **Acceptance criterion satisfied:** the deliberately bad inverse-momentum strategy is blocked by the CLI (test `test_validator_rejects_inverse_momentum`), and a signal change without a companion doc is blocked by the CI gate (test `test_ci_gate_rejects_signal_change_without_doc`).
+
+### Notes
+
+- The validator uses `intersection()` of per-symbol cached parquet windows, so a smaller universe (e.g. trend's 4 ETFs) yields more history than the full-universe research-sprint's intersection. Trend's reported OOS Sharpe here is +0.638 across 6 folds (2003-2026) vs research_sprint's +0.872 across 5 folds (2006-2026) — same strategy, different data slice. The per-strategy `docs/strategies/*.md` is the authoritative per-strategy view; `docs/research/week13_validation.md` is the authoritative cross-strategy view.
+- `docs/strategies/*.md` intentionally contains both auto-generated metric tables and human-authored hypothesis/risks sections. Re-running the validator overwrites the file — so the human sections of `trend.md`/`momentum.md`/`mean_reversion.md` are fresh-template stubs for now. They're worth hand-filling once before Wave 15, but that's prose work and not blocking.
+
 ## [Wave 13 — Week 13: Research sprint (Gate 2)] — 2026-04-22
 
 ### Added

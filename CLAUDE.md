@@ -25,8 +25,8 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 13 — Research sprint / Gate 2 (complete, awaiting commit)
-**Next wave:** 14 — Walk-forward harness refinement
+**Current wave:** 14 — Walk-forward harness refinement (complete, awaiting commit)
+**Next wave:** 15 — HMM regime classifier
 
 ### Completed
 - **Wave 1 (Week 1)** — project scaffold, CI, smoke test
@@ -42,6 +42,7 @@ Do not run `git commit` or `git push` unless explicitly asked.
 - **Wave 11 (Week 11)** — `MeanReversionSignal` (IBS + RSI-2 entry, IBS exit; daily cadence; state-change emissions only). Passes WF+DSR at Alpaca costs: OOS Sharpe +0.60, DSR PSR 0.74. All-period corr vs trend **0.27** (stress 0.20, calm 0.45). **3-strategy combined Sharpe 0.828, maxDD -13.60% — 1.185x best-single, clears the 1.10 target previously missed by trend+momentum alone.** Literal "negative correlation during calm periods" unmet (long-only → both long-biased); flagged as PRD-impossible without shorts. 280/280 tests green.
 - **Wave 12 (Week 12)** — `RiskValidator` (PRD §6.1 hard limits: order size, position size, price deviation) + `DrawdownTracker` (daily loss + rolling monthly DD) + `Killswitch` (file sentinel). Pre-trade hooks wired into `OrderManager`; kill-switch engaged → `LiveRunner._flatten_cycle` flattens within one cycle. **100% coverage on `src/quant/risk/` + `src/quant/execution/`**. Hypothesis property test (10,000 random orders) confirms no false accepts/rejects. 343/343 tests green. Gate 2 code-side prep complete.
 - **Wave 13 (Week 13)** — research sprint. `scripts/research_sprint.py` produces full evaluation (backtest + WF+DSR + stress + regime + correlations + combined) in ~15s. **Gate 2: PASS — all 3 strategies survive.** Trend OOS Sharpe +0.87, momentum +0.80, mean-rev +0.60; all DSR PSR ≥ 0.74; all earn alpha across 3 vol regimes; no strategy blows up in any stress window (worst: trend -2.44 Sharpe in 2022, -11.5% realized DD, under the -15% cap). Combined Sharpe 0.828, maxDD -13.60%. Momentum's standalone -35% DD flagged for Wave 15/16 overlays. Config unchanged; `docs/research/week13_validation.md` captures the full decision. 343/343 tests green.
+- **Wave 14 (Week 14)** — generic strategy validator (`scripts/validate_new_strategy.py`) produces per-strategy markdown reports with PASS/FAIL exit codes. CI gate (`scripts/check_strategy_artifacts.py` + new CI job) blocks PRs that touch `src/quant/signals/` without updating `docs/strategies/`. Acceptance verified: deliberately bad inverse-momentum strategy → exit 1 + FAIL verdict; signal-only diff → CI gate exit 1. Fresh validation artifacts for all 3 surviving strategies generated. 349/349 tests green.
 
 ### In progress
 - _none_
