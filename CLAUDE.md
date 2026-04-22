@@ -25,8 +25,8 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 11 — Mean reversion overlay (complete, awaiting commit)
-**Next wave:** 12 — Risk layer (hard limits + property tests)
+**Current wave:** 12 — Risk layer (complete, awaiting commit)
+**Next wave:** 13 — Research sprint (Gate 2 evaluation, no new code)
 
 ### Completed
 - **Wave 1 (Week 1)** — project scaffold, CI, smoke test
@@ -40,6 +40,7 @@ Do not run `git commit` or `git push` unless explicitly asked.
 - **Wave 9 (Week 9)** — paper-deployment infra: `python -m quant.live.scheduler --broker alpaca-paper --persist` is the 5-day daemon; `make paper-run` / `make paper-dry` / `make review` wrap it. `scripts/review.py` prints equity curve + positions + orders + signals from Postgres. 5-day simulated cycle test proves zero errors and drift convergence. `docs/journal.md` is the per-day log. 239/239 tests green. **Operational handoff:** user runs `make paper-run` for 5 trading days and fills in `docs/journal.md` before Wave 10.
 - **Wave 10 (Week 10)** — `MomentumSignal` (6mo rank, top-3, monthly rebalance) + `portfolio.combine_weights`. Momentum passes Wave 6 validation (OOS Sharpe +0.77, DSR PSR 0.85, deflated excess +0.34). Combined trend+momentum (4/7, 3/7) Sharpe 0.730 > both alone but 1.094x best-single misses the 1.10 target by 0.6pp; correlation 0.66 misses the <0.5 target. Both shortfalls flagged for Week 13 research sprint — the mechanism is tested and correct; the structural decorrelation is what regime overlay (W15) + vol targeting (W16) address. 262/262 tests green.
 - **Wave 11 (Week 11)** — `MeanReversionSignal` (IBS + RSI-2 entry, IBS exit; daily cadence; state-change emissions only). Passes WF+DSR at Alpaca costs: OOS Sharpe +0.60, DSR PSR 0.74. All-period corr vs trend **0.27** (stress 0.20, calm 0.45). **3-strategy combined Sharpe 0.828, maxDD -13.60% — 1.185x best-single, clears the 1.10 target previously missed by trend+momentum alone.** Literal "negative correlation during calm periods" unmet (long-only → both long-biased); flagged as PRD-impossible without shorts. 280/280 tests green.
+- **Wave 12 (Week 12)** — `RiskValidator` (PRD §6.1 hard limits: order size, position size, price deviation) + `DrawdownTracker` (daily loss + rolling monthly DD) + `Killswitch` (file sentinel). Pre-trade hooks wired into `OrderManager`; kill-switch engaged → `LiveRunner._flatten_cycle` flattens within one cycle. **100% coverage on `src/quant/risk/` + `src/quant/execution/`**. Hypothesis property test (10,000 random orders) confirms no false accepts/rejects. 343/343 tests green. Gate 2 code-side prep complete.
 
 ### In progress
 - _none_

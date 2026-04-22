@@ -23,6 +23,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import UUID
 
 from tenacity import (
@@ -39,7 +40,9 @@ from quant.execution.broker_base import (
     OrderRejectedError,
     TransientBrokerError,
 )
-from quant.types import Fill, Order, OrderResult, OrderStatus
+from quant.risk.killswitch import Killswitch
+from quant.risk.limits import RiskValidator
+from quant.types import Account, Fill, Order, OrderResult, OrderStatus, Position
 
 _TERMINAL_STATES = {
     OrderStatus.FILLED,
@@ -69,15 +72,40 @@ class OrderManager:
         submit_backoff: float = 1.0,
         poll_interval: float = 0.5,
         poll_timeout: float = 60.0,
+        risk_validator: RiskValidator | None = None,
+        killswitch: Killswitch | None = None,
     ) -> None:
         self._broker = broker
         self._submit_attempts = submit_attempts
         self._submit_backoff = submit_backoff
         self._poll_interval = poll_interval
         self._poll_timeout = poll_timeout
+        self._risk_validator = risk_validator
+        self._killswitch = killswitch
 
-    def execute(self, order: Order, *, wait_for_fill: bool = False) -> OrderOutcome:
-        """Submit `order`, optionally wait for terminal status."""
+    def execute(
+        self,
+        order: Order,
+        *,
+        wait_for_fill: bool = False,
+        account: Account | None = None,
+        reference_price: Decimal | None = None,
+        current_positions: list[Position] | None = None,
+    ) -> OrderOutcome:
+        """Submit `order`, optionally wait for terminal status.
+
+        When a `RiskValidator` is configured, `account` and
+        `reference_price` MUST be supplied — the validator uses them to
+        size-check the order. When a `Killswitch` is configured and
+        engaged, the order is rejected before any broker call is made.
+        """
+        self._check_killswitch(order)
+        self._check_risk_limits(
+            order,
+            account=account,
+            reference_price=reference_price,
+            current_positions=current_positions,
+        )
         submitted = order.model_copy(update={"submitted_at": datetime.now(UTC)})
         result = self._submit_with_retry(submitted)
         transitions: list[tuple[datetime, OrderStatus]] = [(result.submitted_at, result.status)]
@@ -102,6 +130,33 @@ class OrderManager:
 
     def cancel(self, order_id: UUID) -> None:
         self._broker.cancel_order(order_id)
+
+    # --- Pre-trade hooks -----------------------------------------------
+
+    def _check_killswitch(self, order: Order) -> None:
+        if self._killswitch is not None and self._killswitch.is_engaged():
+            raise OrderRejectedError(order.client_order_id, "killswitch engaged — no new orders")
+
+    def _check_risk_limits(
+        self,
+        order: Order,
+        *,
+        account: Account | None,
+        reference_price: Decimal | None,
+        current_positions: list[Position] | None,
+    ) -> None:
+        if self._risk_validator is None:
+            return
+        if account is None or reference_price is None:
+            raise ValueError("risk_validator configured but account/reference_price not provided")
+        rejection = self._risk_validator.validate_order(
+            order,
+            account,
+            reference_price=reference_price,
+            current_positions=current_positions,
+        )
+        if rejection is not None:
+            raise OrderRejectedError(order.client_order_id, str(rejection))
 
     # --- Internals ------------------------------------------------------
 

@@ -52,6 +52,7 @@ from quant.execution.broker_base import Broker
 from quant.execution.order_manager import OrderManager
 from quant.execution.paper_broker import PaperBroker
 from quant.live.notifier import DiscordNotifier
+from quant.risk.killswitch import Killswitch
 from quant.signals.base import SignalStrategy
 from quant.signals.trend import TrendSignal
 from quant.storage.db import get_sessionmaker
@@ -135,6 +136,7 @@ class LiveRunner:
         closes_provider: ClosesProvider,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
         notifier: DiscordNotifier | None = None,
+        killswitch: Killswitch | None = None,
         dry_run: bool = False,
         wait_for_fill: bool = True,
     ) -> None:
@@ -144,6 +146,7 @@ class LiveRunner:
         self._closes_provider = closes_provider
         self._session_factory = session_factory
         self._notifier = notifier or DiscordNotifier(webhook_url=None)
+        self._killswitch = killswitch
         self._dry_run = dry_run
         self._wait_for_fill = wait_for_fill
 
@@ -153,6 +156,13 @@ class LiveRunner:
 
         try:
             self._notifier.cycle_start(strategy_name, now)
+
+            # Killswitch check — if engaged, flatten and exit. No signal
+            # computation, no broker round-trips beyond the flatten, no
+            # DB writes beyond the resulting position snapshot.
+            if self._killswitch is not None and self._killswitch.is_engaged():
+                return await self._flatten_cycle(now=now, strategy_name=strategy_name)
+
             closes = self._closes_provider()
             if closes.empty:
                 raise ValueError("closes_provider returned an empty frame")
@@ -218,6 +228,59 @@ class LiveRunner:
             msg = f"cycle failed: {exc}"
             self._notifier.cycle_error(strategy_name, msg)
             raise
+
+    async def _flatten_cycle(self, *, now: datetime, strategy_name: str) -> CycleResult:
+        """Kill-switch response: sell every open position at market and
+        mark the cycle complete. Target weights go to the empty dict so
+        the reconciliation step sees "zero-target" and stops emitting.
+
+        Orders go through `OrderManager.execute()` without the risk
+        validator so that the flatten itself can't be blocked by a
+        position-size check. Killswitch itself would be the block there,
+        which is self-defeating during a flatten.
+        """
+        current_positions = self._broker.get_positions()
+
+        planned: list[PlannedOrder] = []
+        for pos in current_positions:
+            if pos.qty == _ZERO:
+                continue
+            planned.append(
+                PlannedOrder(
+                    symbol=pos.symbol,
+                    side=OrderSide.SELL if pos.qty > _ZERO else OrderSide.BUY,
+                    qty=abs(pos.qty),
+                    target_qty=_ZERO,
+                    current_qty=pos.qty,
+                    reference_price=pos.avg_entry_price,
+                )
+            )
+
+        result = CycleResult(
+            as_of=now,
+            strategy=strategy_name,
+            dry_run=self._dry_run,
+            target_weights={},
+            planned_orders=planned,
+            errors=["killswitch engaged — flattening"],
+        )
+
+        if not self._dry_run:
+            for plan in planned:
+                order = plan.as_order(strategy=strategy_name)
+                # Bypass the order-manager's risk + killswitch hooks by
+                # going straight to the broker for a pure close. The
+                # manager would refuse the order because the killswitch
+                # is engaged, which is exactly not what we want here.
+                submit_result = self._broker.submit_order(order)
+                result.submitted_orders.append(order)
+                result.fills_by_order[str(order.client_order_id)] = self._broker.get_fills(
+                    submit_result.order_id
+                )
+
+        result.final_positions = self._broker.get_positions()
+        self._notifier.cycle_complete(strategy_name, result)
+        return result
 
     async def _persist(self, result: CycleResult, *, account: Account) -> None:
         assert self._session_factory is not None

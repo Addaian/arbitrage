@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 
+from quant.config import RiskConfig
 from quant.execution import (
     Broker,
     OrderManager,
@@ -16,6 +17,7 @@ from quant.execution import (
     PaperBroker,
     TransientBrokerError,
 )
+from quant.risk import Killswitch, RiskValidator
 from quant.types import (
     Fill,
     Order,
@@ -221,6 +223,95 @@ def test_transient_during_poll_retries_and_fills_eventually() -> None:
     assert outcome.final_status == OrderStatus.FILLED
     # _safe_get_fills swallows OrderNotFoundError and returns an empty list.
     assert outcome.fills == []
+
+
+# --- Risk-hook integration --------------------------------------------
+
+
+def test_killswitch_blocks_submit(tmp_path) -> None:
+
+    pb = PaperBroker()
+    pb.update_prices({"SPY": Decimal("100")})
+    ks = Killswitch(tmp_path / "HALT")
+    ks.engage(reason="test")
+    om = OrderManager(pb, submit_attempts=1, poll_timeout=0.0, killswitch=ks)
+    with pytest.raises(OrderRejectedError, match="killswitch"):
+        om.execute(_buy())
+
+
+def test_killswitch_allows_when_not_engaged(tmp_path) -> None:
+
+    pb = PaperBroker()
+    pb.update_prices({"SPY": Decimal("100")})
+    ks = Killswitch(tmp_path / "HALT")  # not engaged
+    om = OrderManager(pb, submit_attempts=1, poll_timeout=0.0, killswitch=ks)
+    outcome = om.execute(_buy())
+    assert outcome.result.status == OrderStatus.ACCEPTED
+
+
+def test_risk_validator_rejects_oversize_order() -> None:
+
+    pb = PaperBroker(starting_cash=Decimal("100000"))
+    pb.update_prices({"SPY": Decimal("100")})
+    validator = RiskValidator(
+        RiskConfig(
+            max_position_pct=0.30,
+            max_daily_loss_pct=0.05,
+            max_monthly_drawdown_pct=0.15,
+            max_order_size_pct=0.20,
+            max_price_deviation_pct=0.01,
+            target_annual_vol=0.10,
+            max_gross_exposure=1.0,
+        )
+    )
+    om = OrderManager(pb, submit_attempts=1, poll_timeout=0.0, risk_validator=validator)
+    # 500 * $100 = $50k = 50% of $100k equity — blows order-size cap.
+    order = Order(symbol="SPY", side=OrderSide.BUY, qty=Decimal("500"))
+    acct = pb.get_account()
+    with pytest.raises(OrderRejectedError, match="max_order_size_pct"):
+        om.execute(order, account=acct, reference_price=Decimal("100"))
+
+
+def test_risk_validator_accepts_valid_order() -> None:
+
+    pb = PaperBroker(starting_cash=Decimal("100000"))
+    pb.update_prices({"SPY": Decimal("100")})
+    validator = RiskValidator(
+        RiskConfig(
+            max_position_pct=0.30,
+            max_daily_loss_pct=0.05,
+            max_monthly_drawdown_pct=0.15,
+            max_order_size_pct=0.20,
+            max_price_deviation_pct=0.01,
+            target_annual_vol=0.10,
+            max_gross_exposure=1.0,
+        )
+    )
+    om = OrderManager(pb, submit_attempts=1, poll_timeout=0.0, risk_validator=validator)
+    # 100 * $100 = $10k = 10% of equity — passes all limits.
+    order = Order(symbol="SPY", side=OrderSide.BUY, qty=Decimal("100"))
+    outcome = om.execute(order, account=pb.get_account(), reference_price=Decimal("100"))
+    assert outcome.result.status == OrderStatus.ACCEPTED
+
+
+def test_risk_validator_requires_account_and_price() -> None:
+
+    pb = PaperBroker()
+    pb.update_prices({"SPY": Decimal("100")})
+    validator = RiskValidator(
+        RiskConfig(
+            max_position_pct=0.30,
+            max_daily_loss_pct=0.05,
+            max_monthly_drawdown_pct=0.15,
+            max_order_size_pct=0.20,
+            max_price_deviation_pct=0.01,
+            target_annual_vol=0.10,
+            max_gross_exposure=1.0,
+        )
+    )
+    om = OrderManager(pb, submit_attempts=1, poll_timeout=0.0, risk_validator=validator)
+    with pytest.raises(ValueError, match="account/reference_price"):
+        om.execute(_buy())
 
 
 def test_swapping_broker_preserves_caller_flow() -> None:

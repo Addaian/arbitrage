@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 12 — Week 12: Risk layer (hard limits)] — 2026-04-22
+
+### Added
+- `src/quant/risk/limits.py` — `RiskValidator` enforcing PRD §6.1 rows 1, 4, 5: `check_order_size_pct` (order notional / equity vs 20% cap), `check_position_size_pct` (projected post-fill position / equity vs 30% cap), `check_price_deviation` (limit price vs reference vs 1% cap). Composite `validate_order` runs each predicate in order and returns the first `RejectionReason`. All limit values come from `RiskConfig`, which is Pydantic-capped at PRD limits — a risk limit can only ever be *tighter* than the PRD cap, never looser. No side effects; the validator answers a yes/no question, caller decides what to do.
+- `src/quant/risk/drawdown.py` — `DrawdownTracker` with `push(ts, equity)` append-only snapshots and two metrics: `daily_loss_pct` (today vs yesterday) and `monthly_drawdown_pct` (rolling peak-to-current over a 30-day window via `bisect_left`). Breach predicates `breached_daily_loss()` / `breached_monthly_drawdown()` compare against the configured limits. Snapshot stream must be strictly increasing; equity must be non-negative.
+- `src/quant/risk/killswitch.py` — `Killswitch`: file-sentinel at `/var/run/quant/HALT`. `engage(reason)` writes atomically (temp file + `Path.replace`), auto-creates parent dirs, survives process restarts. `disengage()` and `read_reason()` are idempotent and error-safe. Cleanup on rename failure is verified.
+- `src/quant/risk/__init__.py` — re-exports surface.
+- Pre-trade hooks in `OrderManager`: optional `risk_validator` + `killswitch` constructor args. `execute(order, account=..., reference_price=..., current_positions=...)` checks killswitch first (rejects with "killswitch engaged"), then risk limits (rejects with structured reason). Both checks run **before** any broker round-trip.
+- `LiveRunner` gained an optional `killswitch`. When engaged at cycle start, `_flatten_cycle` short-circuits: no signal computation, no DB writes of signals — just market-sell every open position via the broker directly (bypassing the order-manager's own killswitch block which would block the flatten itself).
+- `tests/unit/test_risk_limits.py` (19 tests) — per-limit guards + composite validate_order. Includes **10,000-example Hypothesis property test** (`test_validator_property_no_false_accepts_or_rejects`): random (qty, ref_price, equity, existing_qty, side) tuples compared against an independent truth recomputation. Zero false accepts, zero false rejects.
+- `tests/unit/test_risk_drawdown.py` (23 tests) — constructor guards, push ordering + negative equity guard, daily loss math (first-snapshot zero, exact-threshold breach, zero-prior guard), monthly drawdown (empty, single snapshot, peak-in-window, breach-at-threshold, peak-outside-window-excluded, bisect boundary inclusion, zero-peak guard), snapshots/reset/latest.
+- `tests/unit/test_risk_killswitch.py` (12 tests) — engage/disengage/idempotence, atomic rename, reason round-trip, parent-dir auto-create, read_reason OSError path, rename-failure cleanup path.
+- `tests/unit/test_order_manager.py` gained risk-hook tests: killswitch blocks submit + unblocks when disengaged, validator rejects oversize, validator accepts valid, validator requires account+ref-price.
+- `tests/unit/test_killswitch_chaos.py` (4 tests) — **Wave 12 acceptance:** engaging the kill-switch mid-run flattens every open position within one cycle, dry-run still plans the flatten, engaged switch with no positions is idle, disengaged switch runs a normal cycle.
+
+### Verified
+- **343/343 tests passing** (342 unit + 1 integration). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- **100% line + branch coverage** on `src/quant/risk/` and `src/quant/execution/` — the two 100%-required modules per CLAUDE.md quality bar.
+- **Hypothesis property test** runs 10,000 random orders in ~7s. No valid order rejected, no invalid order accepted.
+- **Wave 12 acceptance criterion satisfied:** `Killswitch(path).engage()` mid-cycle causes `LiveRunner.run_daily_cycle()` to flatten the paper account on the next call (verified by `test_killswitch_flattens_paper_account_within_one_cycle`).
+
+### Notes
+
+- The `_flatten_cycle` path deliberately bypasses `OrderManager.execute()` in favour of `Broker.submit_order()` directly: the manager's own killswitch hook would refuse the flatten orders because the switch is engaged. Using the broker directly keeps the hook's semantics honest ("no new *strategy* orders when engaged") while still allowing the only kind of order that *should* happen during a halt — liquidating.
+- Gate 2 (Week 13) prep is now complete on the code side: all 3 strategies pass WF+DSR, 3-strategy combined Sharpe 0.828 (1.185x best-single), risk layer at 100% coverage with property tests. Week 13 is the research sprint — pure analysis, no new code.
+
 ## [Wave 11 — Week 11: Mean reversion overlay] — 2026-04-21
 
 ### Added
