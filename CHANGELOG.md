@@ -6,6 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 15 — Week 15: HMM regime classifier] — 2026-04-22
+
+### Added
+- `src/quant/models/hmm_regime.py` — `RegimeHMM`: 3-state Gaussian HMM via `hmmlearn`. Features (default): weekly log-returns, 5-week realized vol, term-structure proxy (`vol_5w / vol_20w`). State-label stabilisation by realized-vol rank: the highest-vol state is always `stress`, lowest is `calm`, middle is `neutral`. `predict_proba` returns columns in canonical `[calm, neutral, stress]` order so callers don't depend on raw state IDs. `save` / `load` via `joblib`. Refuses to fit with fewer than 52 weekly observations. VIX / VIX-term-structure are supported as additional input columns but not required — yfinance `^VIX` isn't in the cache yet, so the default feature set is SPY-derived.
+- `src/quant/portfolio/sizing.py`:
+  - `regime_multiplier(p_stress)` — the PRD §5.4 / plan-literal formula `(1 - p_stress).clip(0, 1)`.
+  - `regime_weighted_multiplier(proba, state_weights)` — more flexible 3-level overlay. Weighted average of state probabilities; caller chooses per-state multipliers (e.g. `{"calm": 1.0, "neutral": 0.5, "stress": 0.0}`). Clamps to `[0, 1]`, rejects unknown / missing state labels, rejects out-of-range weights.
+  - `apply_regime_overlay(weights, multiplier, cash_symbol)` — scales risk columns by the ffill-aligned multiplier and absorbs the slack into `cash_symbol`. NaN rows (hold-previous) stay NaN. Row sums stay ≤ 1.
+- `src/quant/models/__init__.py`, `src/quant/portfolio/__init__.py` — re-exports.
+- `scripts/train_regime.py` — weekly retrain CLI. `uv run python scripts/train_regime.py [--reference SPY] [--output path]`. Writes a dated artifact under `data/models/regime_<date>.joblib` plus a stable `regime_latest.joblib` copy for the LiveRunner to consume. Prints Rich summary: transition matrix, latest posterior, last-4w / last-52w stress means.
+- `tests/unit/test_hmm_regime.py` (24 tests) — feature pipeline (empty guard, shape), fit guards (too-short dataset), stress-state labelling, stable-order predict_proba, predict-before-fit error, transition matrix shape + row sums, **known-state recovery >80% on synthetic 2-regime data (plan acceptance)**, save/load roundtrip, load type guard, regime_multiplier math, apply_regime_overlay (basic scaling, NaN preservation, ffill, missing cash, empty frame), regime_weighted_multiplier (basic, empty, state-name validation, weight-range validation).
+
+### Verified
+- **373/373 tests passing** (+1 skipped doc test). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- **Known-state recovery acceptance:** HMM correctly classifies >80% of bars on a synthetic 2-regime dataset with calm/stress weekly vol of 1%/6% (`test_known_state_recovery_better_than_chance`).
+- **Real-data stress identification:** HMM fit on SPY 2003-2026 flags exactly the expected periods as stress (stress-probability > 0.5): 13 weeks in 2008, 21 weeks in 2009, 21 weeks in 2020. No false stress signals during low-vol periods.
+- **Overlay backtest (10-month trend on SPY/EFA/IEF/SHY, 2003-2026, 0bp+3bp slip):**
+
+  | overlay                          | Sharpe | CAGR    | max DD   | Calmar | dd_red | cagr_red |
+  |---                               |---     |---      |---       |---     |---     |---       |
+  | baseline (no overlay)            | 0.749  | +5.73%  | -16.37%  | 0.350  | —      | —        |
+  | `1 - p(stress)` (literal)        | 0.727  | +5.48%  | -16.37%  | 0.335  | 0.0%   | +4.3%    |
+  | `calm·1 + neutral·0.5` (weighted)| 0.774  | +5.29%  | -12.48%  | 0.424  | **+23.7%** | **+7.6%** |
+
+  The weighted overlay **clears plan acceptance on trend-only**: max DD reduced by 23.7% (target ≥ 20%), CAGR reduction 7.6% (target < 15%), **Sharpe improves 0.749 → 0.774**, Calmar improves 0.35 → 0.42.
+
+### Known shortfall — combined-portfolio overlay misses acceptance
+
+Applying either overlay formulation to the **3-strategy combined portfolio** (trend/momentum/mean-rev 0.47/0.35/0.18) does NOT clear acceptance:
+
+| overlay                          | Sharpe | CAGR   | max DD   | dd_red | cagr_red |
+|---                               |---     |---     |---       |---     |---       |
+| baseline combined                | 0.828  | +7.31% | -13.60%  | —      | —        |
+| `1 - p(stress)`                  | 0.732  | +6.21% | -13.60%  | 0.0%   | +15.1%   |
+| `calm·1 + neutral·0.5`           | 0.811  | +5.78% | -11.10%  | +18.3% | +20.9%   |
+| `calm·1 + neutral·0.6 + stress·0.2`| 0.825| +6.10% | -11.40%  | +16.1% | +16.5%   |
+
+Root cause (diagnosed, not speculated): the combined portfolio's **max DD occurred 2015-01 → 2016-01** (peak Jan 2015, trough Jan 2016), driven by momentum's oil/EM exposure during the 2014-16 commodity crash. That period is a **neutral-vol regime**, not a stress-vol one — SPY's 60d vol was elevated but never extreme enough for the HMM to flag as stress. The overlay protects against 2008-style vol spikes (which it does catch — cf. stress identification above) but can't dampen a slow commodity-rotation DD that sits in the middle vol tercile.
+
+Flagged for **Wave 16 (vol targeting)**: EWMA vol-target scaling applies to *realized* portfolio vol directly, which will dampen the 2015-16 DD where the regime overlay can't. The two overlays compose multiplicatively on portfolio weights; together they're expected to clear the combined-portfolio acceptance.
+
+### Notes
+
+- The transition matrix after fitting on SPY 2003-2026 shows strongly sticky regimes (diagonals > 0.89), which matches prior research on market volatility regimes.
+- `scripts/train_regime.py` always writes a `regime_latest.joblib` alongside the dated artifact so production runners can read "the most recent model" by stable filename. The weekly cron / systemd timer wiring is Wave 17 scope.
+- The LiveRunner doesn't yet call `RegimeHMM` — wiring the overlay into `run_daily_cycle` is a small follow-up inside Wave 16 when vol targeting lands alongside it.
+
 ## [Wave 14 — Week 14: Walk-forward harness refinement] — 2026-04-22
 
 ### Added

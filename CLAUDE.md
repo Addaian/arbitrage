@@ -25,8 +25,8 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 14 — Walk-forward harness refinement (complete, awaiting commit)
-**Next wave:** 15 — HMM regime classifier
+**Current wave:** 15 — HMM regime classifier (complete, awaiting commit)
+**Next wave:** 16 — Vol targeting
 
 ### Completed
 - **Wave 1 (Week 1)** — project scaffold, CI, smoke test
@@ -43,6 +43,7 @@ Do not run `git commit` or `git push` unless explicitly asked.
 - **Wave 12 (Week 12)** — `RiskValidator` (PRD §6.1 hard limits: order size, position size, price deviation) + `DrawdownTracker` (daily loss + rolling monthly DD) + `Killswitch` (file sentinel). Pre-trade hooks wired into `OrderManager`; kill-switch engaged → `LiveRunner._flatten_cycle` flattens within one cycle. **100% coverage on `src/quant/risk/` + `src/quant/execution/`**. Hypothesis property test (10,000 random orders) confirms no false accepts/rejects. 343/343 tests green. Gate 2 code-side prep complete.
 - **Wave 13 (Week 13)** — research sprint. `scripts/research_sprint.py` produces full evaluation (backtest + WF+DSR + stress + regime + correlations + combined) in ~15s. **Gate 2: PASS — all 3 strategies survive.** Trend OOS Sharpe +0.87, momentum +0.80, mean-rev +0.60; all DSR PSR ≥ 0.74; all earn alpha across 3 vol regimes; no strategy blows up in any stress window (worst: trend -2.44 Sharpe in 2022, -11.5% realized DD, under the -15% cap). Combined Sharpe 0.828, maxDD -13.60%. Momentum's standalone -35% DD flagged for Wave 15/16 overlays. Config unchanged; `docs/research/week13_validation.md` captures the full decision. 343/343 tests green.
 - **Wave 14 (Week 14)** — generic strategy validator (`scripts/validate_new_strategy.py`) produces per-strategy markdown reports with PASS/FAIL exit codes. CI gate (`scripts/check_strategy_artifacts.py` + new CI job) blocks PRs that touch `src/quant/signals/` without updating `docs/strategies/`. Acceptance verified: deliberately bad inverse-momentum strategy → exit 1 + FAIL verdict; signal-only diff → CI gate exit 1. Fresh validation artifacts for all 3 surviving strategies generated. 349/349 tests green.
+- **Wave 15 (Week 15)** — `RegimeHMM` 3-state Gaussian HMM on SPY weekly features (log-return, 5w vol, 5w/20w vol ratio). State-label stabilisation: highest-vol=stress, lowest=calm. `regime_multiplier`/`regime_weighted_multiplier` + `apply_regime_overlay` in `portfolio/sizing.py`. `scripts/train_regime.py` weekly retrain → `data/models/regime_latest.joblib`. **Known-state recovery 80%+ on synthetic (plan acceptance). Trend-only acceptance: overlay reduces max DD by 23.7% (target ≥20%), CAGR -7.6% (target <15%), Sharpe 0.749→0.774, Calmar 0.35→0.42.** Real-data stress flags exactly 2008/2009/2020 weeks — no false positives. Combined-portfolio overlay misses acceptance because max DD (2015-16) is in neutral-vol regime; flagged for Wave 16 vol-target composition. 373/373 tests green.
 
 ### In progress
 - _none_
