@@ -6,6 +6,60 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 13 — Week 13: Research sprint (Gate 2)] — 2026-04-22
+
+### Added
+- `scripts/research_sprint.py` — one-command Week-13 evaluation runner. Loads full 2006-2026 OHLC, runs per-strategy backtest + walk-forward + DSR, computes stress-period Sharpes (2008 GFC / 2020 COVID / 2022 / April 2025), vol-regime-conditioned Sharpes, daily-return correlation matrix, and 3-strategy combined portfolio metrics. Optional `--output <path>` writes a JSON summary for downstream docs. Alpaca ETF cost profile (0 bp + 3 bp slippage). Run time ~15s.
+- `docs/research/week13_validation.md` — **Gate 2 decision document**. Contains headline numbers, stress-window tables, vol-regime tables, correlation matrix, open concerns flagged for Waves 15/16, and the final per-strategy go/no-go verdict.
+- `data/research/week13_summary.json` — machine-readable summary of the sprint run.
+
+### Verified — Gate 2: **PASS** (all 3 strategies survive)
+
+Plan acceptance: *"At least 2 of 3 strategies pass all validation gates."*
+Result: **all 3 pass**. Key numbers, 2006-02 → 2026-04:
+
+| strategy       | CAGR   | Sharpe | OOS Sharpe | DSR PSR | max DD   |
+|----------------|--------|--------|------------|---------|----------|
+| trend          | +5.28% | 0.698  | **+0.872** | 0.907   | -16.37%  |
+| momentum       | +9.84% | 0.694  | **+0.800** | 0.872   | -34.97%  |
+| mean_reversion | +6.27% | 0.631  | **+0.604** | 0.741   | -14.93%  |
+
+Every strategy clears OOS Sharpe ≥ 0.4 and DSR PSR > 0.5. Every strategy
+earns a positive Sharpe in **all three** SPY-vol regimes (low / mid /
+high). No strategy blows up in any single stress window: worst observed
+single-window Sharpe was trend's -2.44 during the 2022 double-down,
+with a realized equity drawdown of -11.5% — inside the -15% monthly cap.
+
+**Combined 3-strategy portfolio** (0.47 / 0.35 / 0.18 normalized from
+config's 0.40 / 0.30 / 0.15, since the 0.15 regime+vol sleeves aren't
+live yet): **Sharpe 0.828**, CAGR +7.31%, max DD -13.60%, Sortino 1.323.
+Combined Sharpe is 1.185x best-single — real diversification benefit.
+
+### Known items flagged for Waves 15/16 (sophistication phase)
+
+1. **Momentum standalone max DD -34.97%** exceeds PRD §6.1's -15% monthly
+   cap. In the combined portfolio at 35% allocation the worst-case
+   contribution is roughly -12% — under the cap. Regime overlay
+   (Wave 15) + vol targeting (Wave 16) are the designed fixes.
+2. **Trend-momentum correlation 0.66** limits 2-strategy diversification;
+   mean-reversion (corr 0.27 / 0.30) is what buys the extra Sharpe.
+3. **Mean-reversion's 1,894 rebalance events** make it sensitive to
+   commission changes. At Alpaca's $0 ETF commissions this is fine.
+
+None are survival-blockers; all are documented in
+`docs/research/week13_validation.md`.
+
+### Config changes
+
+None. All three strategies stay enabled at the plan-specified weights
+in `config/strategies.yaml`. The 0.15 reserved for regime + vol
+overlays remains parked until Waves 15/16.
+
+### Tests
+
+No new unit tests this wave — Week 13 is analysis, not code delivery.
+All 343 tests remain green. Ruff clean, format clean, mypy strict clean.
+
 ## [Wave 12 — Week 12: Risk layer (hard limits)] — 2026-04-22
 
 ### Added

@@ -25,8 +25,8 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 12 — Risk layer (complete, awaiting commit)
-**Next wave:** 13 — Research sprint (Gate 2 evaluation, no new code)
+**Current wave:** 13 — Research sprint / Gate 2 (complete, awaiting commit)
+**Next wave:** 14 — Walk-forward harness refinement
 
 ### Completed
 - **Wave 1 (Week 1)** — project scaffold, CI, smoke test
@@ -41,16 +41,18 @@ Do not run `git commit` or `git push` unless explicitly asked.
 - **Wave 10 (Week 10)** — `MomentumSignal` (6mo rank, top-3, monthly rebalance) + `portfolio.combine_weights`. Momentum passes Wave 6 validation (OOS Sharpe +0.77, DSR PSR 0.85, deflated excess +0.34). Combined trend+momentum (4/7, 3/7) Sharpe 0.730 > both alone but 1.094x best-single misses the 1.10 target by 0.6pp; correlation 0.66 misses the <0.5 target. Both shortfalls flagged for Week 13 research sprint — the mechanism is tested and correct; the structural decorrelation is what regime overlay (W15) + vol targeting (W16) address. 262/262 tests green.
 - **Wave 11 (Week 11)** — `MeanReversionSignal` (IBS + RSI-2 entry, IBS exit; daily cadence; state-change emissions only). Passes WF+DSR at Alpaca costs: OOS Sharpe +0.60, DSR PSR 0.74. All-period corr vs trend **0.27** (stress 0.20, calm 0.45). **3-strategy combined Sharpe 0.828, maxDD -13.60% — 1.185x best-single, clears the 1.10 target previously missed by trend+momentum alone.** Literal "negative correlation during calm periods" unmet (long-only → both long-biased); flagged as PRD-impossible without shorts. 280/280 tests green.
 - **Wave 12 (Week 12)** — `RiskValidator` (PRD §6.1 hard limits: order size, position size, price deviation) + `DrawdownTracker` (daily loss + rolling monthly DD) + `Killswitch` (file sentinel). Pre-trade hooks wired into `OrderManager`; kill-switch engaged → `LiveRunner._flatten_cycle` flattens within one cycle. **100% coverage on `src/quant/risk/` + `src/quant/execution/`**. Hypothesis property test (10,000 random orders) confirms no false accepts/rejects. 343/343 tests green. Gate 2 code-side prep complete.
+- **Wave 13 (Week 13)** — research sprint. `scripts/research_sprint.py` produces full evaluation (backtest + WF+DSR + stress + regime + correlations + combined) in ~15s. **Gate 2: PASS — all 3 strategies survive.** Trend OOS Sharpe +0.87, momentum +0.80, mean-rev +0.60; all DSR PSR ≥ 0.74; all earn alpha across 3 vol regimes; no strategy blows up in any stress window (worst: trend -2.44 Sharpe in 2022, -11.5% realized DD, under the -15% cap). Combined Sharpe 0.828, maxDD -13.60%. Momentum's standalone -35% DD flagged for Wave 15/16 overlays. Config unchanged; `docs/research/week13_validation.md` captures the full decision. 343/343 tests green.
 
 ### In progress
 - _none_
 
-### Gate 1 — CLEARED
-**End of Week 6:** trend strategy passes Deflated Sharpe > 0 (deflated excess +0.19) and walk-forward OOS Sharpe ≥ 0.4 (+0.60 concatenated across 6 rolling folds). Adversarial overfit variant is rejected by the DSR harness with exit 1.
+### Gate 1 — CLEARED (Week 6)
+Trend strategy passes Deflated Sharpe > 0 (deflated excess +0.19) and walk-forward OOS Sharpe ≥ 0.4 (+0.60 concatenated across 6 rolling folds). Adversarial overfit variant is rejected by the DSR harness with exit 1.
+
+### Gate 2 — CLEARED (Week 13)
+All 3 strategies survive: OOS Sharpes +0.87 / +0.80 / +0.60, DSR PSRs ≥ 0.74, positive Sharpe in every vol regime, no stress-window blow-ups. Combined 3-strategy Sharpe 0.828, maxDD -13.60%. Full decision in `docs/research/week13_validation.md`.
 
 ### Gates ahead
-- **Gate 1 (end of Week 6):** trend strategy must pass Deflated Sharpe > 0, walk-forward OOS Sharpe ≥ 0.4
-- **Gate 2 (end of Week 13):** ≥2 of 3 strategies survive full validation
 - **Gate 3 (end of Week 19):** 30-day paper Sharpe within 50% of backtest Sharpe
 - **Gate 4 (Week 20 + 1 week live):** autonomous run with no critical alerts
 
