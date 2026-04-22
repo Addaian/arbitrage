@@ -25,8 +25,8 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 19 — Final pre-live checks (complete, awaiting commit + operational Gate-3 sign-off)
-**Next wave:** 20 — Go live (10% capital)
+**Current wave:** 20 — Go live 10% capital (complete, awaiting commit + operational flip to real money)
+**Next wave:** _none — V1 code build complete; remaining work is operational: Gate 3 sign-off, fund Alpaca live, `make live-switch`, Gate 4 review at week 21_
 
 ### Completed
 - **Wave 1 (Week 1)** — project scaffold, CI, smoke test
@@ -48,6 +48,7 @@ Do not run `git commit` or `git push` unless explicitly asked.
 - **Wave 17 (Week 17)** — production VPS deployment kit. `deploy/systemd/` has three hardened units: `quant-runner.service` (oneshot cycle, `NoNewPrivileges`/`ProtectSystem=strict`/etc), `quant-runner.timer` (`Mon..Fri 15:45 America/New_York`, `Persistent=true`), and `quant-scheduler.service` (alternative daemon mode). `deploy/bootstrap.sh` is one-command idempotent Ubuntu 24.04 setup (UFW, fail2ban, unattended-upgrades, Postgres native, `uv`, clone, migrations, systemd install). `deploy/README.md` is the operator runbook. 24 guardrail tests enforce syntax + hardening + runner-bootstrap consistency. 412/412 tests green. **Operational handoff to user:** cold-boot Hetzner, run bootstrap, smoke-test — target &lt;30min per plan acceptance.
 - **Wave 18 (Week 18)** — observability stack. `quant.monitoring.metrics` exports 12 Prometheus metrics wired into `LiveRunner` cycle success/error paths. `quant.monitoring.sentry` + `DiscordNotifier.alert(severity, ...)` for exception routing. `deploy/prometheus/` has a Docker-Compose stack (Prometheus 3.1 + Alertmanager 0.28 + Grafana 11.4) with provisioned datasource + dashboard JSON (equity curve, position values, daily return, rolling Sharpe, cycle duration p50/p95, error counts, killswitch). Alert rules cover all 7 PRD §6.3 rows (test enforces coverage by `prd_row` label). 431/431 tests green. **Operational handoff:** VPS-side `docker compose up -d` in `deploy/prometheus/`, start the 30-day paper qualifier Monday of week 18 (feeds Gate 3 at Wave 19).
 - **Wave 19 (Week 19)** — Gate 3 pre-live infra. `scripts/paper_vs_backtest.py` computes 30-day tracking error (paper-vs-backtest Sharpe) with exit 0/1 gating on 50% threshold. `LiveRunner._emit_rolling_sharpe` closes the Wave-18 follow-up (Prometheus rolling-30d-Sharpe gauge now written each cycle). `docs/disaster_recovery.md` runbook covers 3 scenarios with <1h RTO target. `docs/go_live_checklist.md` is the printable sign-off sheet for Gate 3 (tracking error, alerts, DR drill, kill-switch drill, KYC, observability sanity, codebase sanity, gates history). 444/444 tests green. **Operational handoff:** after 30-day paper qualifier ends, run paper-vs-backtest CLI + DR drill + kill-switch drill, complete checklist, print + sign before Wave 20.
+- **Wave 20 (Week 20)** — go-live infra. Runner CLI gained `--broker alpaca-live` (real money); Settings live-env guard enforces `quant_env=live + paper_mode=false`. `scripts/preflight_live.py` runs 7 gates (env tags, creds, live URL, account equity, killswitch clear, recent paper PnL, config parses) with exit 0/1; invoked by `quant-runner-live.service`'s ExecStartPre so a mis-configured .env literally prevents the live cycle from firing. `deploy/systemd/quant-runner-live.service` declares `Conflicts=quant-runner.service` for mutual exclusion. Makefile: `preflight-live` / `live-dry` / `live-run` / `live-switch` / `paper-switch`. Docs: `day_one_retrospective.md`, `scaling_plan.md` (10% → 50% W22 → 100% W26 with scale-UP and scale-DOWN triggers), `gate4_checklist.md` (week-21 review). 466/466 tests green. **V1 build complete.**
 
 ### In progress
 - _none_
@@ -58,9 +59,11 @@ Trend strategy passes Deflated Sharpe > 0 (deflated excess +0.19) and walk-forwa
 ### Gate 2 — CLEARED (Week 13)
 All 3 strategies survive: OOS Sharpes +0.87 / +0.80 / +0.60, DSR PSRs ≥ 0.74, positive Sharpe in every vol regime, no stress-window blow-ups. Combined 3-strategy Sharpe 0.828, maxDD -13.60%. Full decision in `docs/research/week13_validation.md`.
 
-### Gates ahead
-- **Gate 3 (end of Week 19):** 30-day paper Sharpe within 50% of backtest Sharpe
-- **Gate 4 (Week 20 + 1 week live):** autonomous run with no critical alerts
+### Gate 3 — code complete, operational sign-off pending (end of Week 19)
+Tooling delivered: `scripts/paper_vs_backtest.py` computes 30-day tracking error with exit 0/1 on the 50% threshold. `docs/go_live_checklist.md` is the printable sign-off sheet. User's 30-day paper qualifier + DR drill + kill-switch drill + KYC are the remaining operational items.
+
+### Gate 4 — code complete, operational sign-off pending (Week 20 + 1 week live)
+`docs/gate4_checklist.md` enumerates the 6 review sections (cycle completions, no manual interventions, alert review, tracking error smell-test, DR drill on live DB, Grafana audit). Hold at 10% through week 22, then evaluate 50% step-up per `docs/scaling_plan.md`.
 
 ## Tech stack (don't change without updating PRD)
 

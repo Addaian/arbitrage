@@ -6,6 +6,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 20 — Week 20: Go live (10% capital)] — 2026-04-22
+
+**Final wave of the 20-week V1 build.** Code side is complete; the
+operational flip to real money is the user's next action.
+
+### Added
+
+**Python:**
+- `src/quant/live/runner.py::_build_default_runner` — accepts `broker_kind="alpaca-live"`. Constructs `AlpacaBroker.from_credentials(paper=False)`, i.e. real-money endpoint. Gated on `quant_env="live"` and `paper_mode=False` in `Settings` (belt-and-braces; config.py already validates this on load, but the runner refuses again inline). The `--broker` CLI choice on both `quant.live.runner` and `quant.live.scheduler` now lists `alpaca-live` with a "REAL MONEY" hint.
+
+**CLI:**
+- `scripts/preflight_live.py` — 7-gate pre-live check with exit codes. Gates: `quant_env=live + paper_mode=false`, Alpaca creds populated, Alpaca base URL is the live endpoint (not `paper-api.alpaca.markets`), `get_account` returns equity ≥ `--min-equity` (default $100 = 10% of a $1k target), kill-switch not engaged, latest `pnl_snapshots` row < 36h old, `load_config_bundle()` parses. Refactored to one function per gate so the Typer command stays under the PLR0915 complexity cap and individual gates are unit-testable. Invoked from the live systemd unit's `ExecStartPre=`, so a misconfigured `.env` literally prevents the live cycle from firing.
+
+**systemd:**
+- `deploy/systemd/quant-runner-live.service` — parallel to `quant-runner.service` but with `--broker alpaca-live` and `ExecStartPre=/usr/local/bin/uv run python .../scripts/preflight_live.py`. Declares `Conflicts=quant-runner.service` so systemd refuses to activate both simultaneously. Same hardening as the paper unit (`NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, etc).
+- `deploy/bootstrap.sh` — installs the live unit alongside paper+scheduler unit files. Live unit stays **disabled** until `make live-switch`.
+
+**Makefile:**
+- `preflight-live` — run the 7-gate check read-only.
+- `live-dry` — one-shot dry-run cycle against the live API (equity + positions fetch, no orders).
+- `live-run` — one live cycle with persistence (the systemd ExecStart).
+- `live-switch` — sudo-gated paper → live flip: runs `preflight-live`, disables the paper timer, enables `quant-runner-live.service`.
+- `paper-switch` — sudo-gated revert if anything goes wrong in the first week.
+
+**Docs:**
+- `docs/day_one_retrospective.md` — single-day retrospective template. Pre-flight artefact, first-cycle timing, positions snapshot, **deltas from paper** (the important bit — slippage / sizing / rejection surprises), alert log, action items, GO/NO-GO verdict with sign+date line.
+- `docs/scaling_plan.md` — the 10% → 50% (week 22) → 100% (week 26) schedule with explicit pass/fail triggers at each step-up AND scale-DOWN triggers (max monthly DD, negative 30d Sharpe, spurious criticals, tracking error > 75%). Mechanics section covers how Alpaca ACH transfers interact with cycle sizing — strategies use percentage allocations so a capital step-up is automatically priced in next cycle.
+- `docs/gate4_checklist.md` — week-21 Gate 4 evaluation checklist. 6 sections (cycle completions, no manual interventions, alert review, tracking error smell-test, DR drill re-run on live DB, Grafana dashboard audit). Printable sign-off at the bottom.
+
+**Tests:**
+- `tests/unit/test_wave20_go_live.py` (22 tests) — `alpaca-live` broker construction (paper=False, live-env required, creds required); `Settings` live-env guard round-trip; systemd unit structure (exists, parses, uses `--broker alpaca-live`, runs `preflight_live.py` as ExecStartPre, hardening directives, `Conflicts=` paper unit, bootstrap references it); `preflight_live.py` pure helper round-trip (paper URL rejected, live URL accepted); go-live docs (day-1 retro has expected sections, scaling plan covers 10/50/100% AND scale-down triggers, Gate 4 checklist enumerates plan acceptance + DR rehearsal); Makefile has the 5 new targets + `live-switch` runs `preflight-live` first; runner + scheduler CLIs both list `alpaca-live` in `--help` output (subprocess end-to-end).
+
+### Verified
+- **466/466 tests passing** (+1 skipped doc test). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- Full CLI surface works end-to-end: `uv run python -m quant.live.runner --help` and `scheduler --help` both list `alpaca-live`. `uv run python scripts/preflight_live.py --help` shows the three flags.
+
+### V1 build complete: operational sequence to go live
+
+Nothing left in code. Remaining work is user-operational:
+
+1. **Complete Gate 3** per `docs/go_live_checklist.md`: finish 30-day paper qualifier, run `scripts/paper_vs_backtest.py`, rehearse DR Scenario 1, kill-switch drill, KYC, observability sanity — then print + sign.
+2. **Fund Alpaca live account** with 10% of intended target ($150 if target is $1,500).
+3. **On the VPS:** edit `/opt/quant-system/.env`:
+   ```ini
+   QUANT_ENV=live
+   PAPER_MODE=false
+   BROKER_PROVIDER=alpaca
+   ALPACA_BASE_URL=https://api.alpaca.markets
+   ALPACA_API_KEY=<LIVE key, different from paper>
+   ALPACA_API_SECRET=<LIVE secret>
+   ```
+4. `make preflight-live` (or the systemd `ExecStartPre` hook will run it for you) — all 7 gates must pass.
+5. `make live-switch` — disables the paper timer, enables the live unit. The `Conflicts=` directive mutually excludes them.
+6. First cycle fires at 3:45pm ET on the next trading weekday.
+7. Fill in `docs/day_one_retrospective.md` the day after.
+8. Monitor daily for 5 days. After 7 calendar days, walk `docs/gate4_checklist.md`. If pass, hold at 10% through week 22, then evaluate 50% step-up per `docs/scaling_plan.md`.
+
+### Project-level status
+
+- **Gates 1 & 2 cleared** (Waves 6 and 13).
+- **Gate 3 code-complete** (Wave 19); operational sign-off pending user.
+- **Gate 4 code-complete** (this wave); operational sign-off pending user after 1 week live.
+- **20-week V1 code delivery: complete.**
+- Test count: 466 → matches the plan's quality bars (100% on risk/execution, >80% on signals/features, 10k-example Hypothesis property test on risk).
+- `docs/` contains: `journal.md` (ops log, user-maintained), `go_live_checklist.md` (Gate 3), `gate4_checklist.md` (Gate 4), `day_one_retrospective.md`, `disaster_recovery.md`, `scaling_plan.md`, `research/week13_validation.md` (Gate 2), `strategies/{trend,momentum,mean_reversion}.md`, `strategy_template.md`.
+
+PRD §1.2 long-run success (12-month live): live Sharpe ≥ 0.5, max DD < 20%, tracking error < 30% over 90-day rolling window. The 20-week build delivers the mechanism; the next 12 months are the verification.
+
 ## [Wave 19 — Week 19: Final pre-live checks] — 2026-04-22
 
 ### Added

@@ -1,0 +1,57 @@
+# REAL-MONEY one-shot daily trading cycle (Wave 20).
+#
+# Parallel to quant-runner.service but flips `--broker alpaca-live`.
+# Operators enable EXACTLY ONE of quant-runner.service or
+# quant-runner-live.service at a time — they both listen for the same
+# quant-runner.timer. The bootstrap installs both and `DEPLOY_SYSTEMD`
+# picks the default.
+#
+# ExecStartPre runs the Wave 19/20 pre-flight script. If any live-mode
+# gate fails (env tags, creds, killswitch, recent paper PnL), systemd
+# refuses to start the unit — the paper-to-live flip is literally
+# aborted by the same gate an operator would hand-check.
+#
+# Install target: /etc/systemd/system/quant-runner-live.service
+
+[Unit]
+Description=quant-system REAL-MONEY daily cycle (one-shot)
+Documentation=https://github.com/Addaian/arbitrage
+Requires=postgresql.service
+After=postgresql.service network-online.target
+Wants=network-online.target
+# Systemd won't start if quant-runner.service (paper) is active — this
+# is a belt-and-braces mutual exclusion; the operator should also
+# `systemctl disable --now quant-runner.service` before enabling this.
+Conflicts=quant-runner.service
+
+[Service]
+Type=oneshot
+User=quant
+Group=quant
+WorkingDirectory=/opt/quant-system
+EnvironmentFile=/opt/quant-system/.env
+# Pre-flight gate: refuses to submit any live orders if QUANT_ENV != live,
+# API keys missing, killswitch engaged, or paper PnL is stale.
+ExecStartPre=/usr/local/bin/uv run python /opt/quant-system/scripts/preflight_live.py
+ExecStart=/usr/local/bin/uv run python -m quant.live.runner --broker alpaca-live --persist
+
+TimeoutStartSec=600
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/quant-system/data
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=quant-runner-live
+
+[Install]
+WantedBy=multi-user.target

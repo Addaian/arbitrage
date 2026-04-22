@@ -472,6 +472,10 @@ def _build_default_runner(
         - "paper"         — in-memory PaperBroker simulator (no network)
         - "alpaca-paper"  — AlpacaBroker against paper-api.alpaca.markets;
                             requires ALPACA_API_KEY + ALPACA_API_SECRET
+        - "alpaca-live"   — AlpacaBroker against api.alpaca.markets with
+                            real money. Requires `quant_env=live` and
+                            `paper_mode=false` in Settings, both of
+                            which are cross-validated at config load.
 
     `persist=True` wires Postgres persistence via the shared sessionmaker.
     Dry-run implies no persistence regardless.
@@ -514,15 +518,23 @@ def _build_default_runner(
     broker: Broker
     if broker_kind == "paper":
         broker = PaperBroker(starting_cash=Decimal("100000"))
-    elif broker_kind == "alpaca-paper":
+    elif broker_kind in ("alpaca-paper", "alpaca-live"):
         if settings.alpaca_api_key is None or settings.alpaca_api_secret is None:
             raise ValueError(
-                "broker=alpaca-paper requires ALPACA_API_KEY and ALPACA_API_SECRET in .env"
+                f"broker={broker_kind} requires ALPACA_API_KEY and ALPACA_API_SECRET in .env"
+            )
+        if broker_kind == "alpaca-live" and (settings.quant_env != "live" or settings.paper_mode):
+            # Guardrail: real-money broker requires the env tag to match.
+            # The Settings validator already enforces this on init, but
+            # repeat here so operators reading the runner code see why
+            # it's blocked.
+            raise ValueError(
+                "broker=alpaca-live requires QUANT_ENV=live AND PAPER_MODE=false in .env"
             )
         broker = AlpacaBroker.from_credentials(
             api_key=settings.alpaca_api_key.get_secret_value(),
             api_secret=settings.alpaca_api_secret.get_secret_value(),
-            paper=True,
+            paper=(broker_kind == "alpaca-paper"),
         )
     else:
         raise ValueError(f"unknown broker kind: {broker_kind!r}")
@@ -556,9 +568,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="quant.live.runner")
     parser.add_argument(
         "--broker",
-        choices=["paper", "alpaca-paper"],
+        choices=["paper", "alpaca-paper", "alpaca-live"],
         default="paper",
-        help="paper = local in-memory sim; alpaca-paper = Alpaca paper API",
+        help=(
+            "paper = local in-memory sim; "
+            "alpaca-paper = Alpaca paper API; "
+            "alpaca-live = REAL MONEY (requires QUANT_ENV=live in .env)"
+        ),
     )
     parser.add_argument("--dry-run", action="store_true", help="plan only, no submits, no DB")
     parser.add_argument(

@@ -198,6 +198,9 @@ log "systemd: installing units (${DEPLOY_SYSTEMD} mode)"
 install -m 0644 "${INSTALL_DIR}/deploy/systemd/quant-runner.service" /etc/systemd/system/
 install -m 0644 "${INSTALL_DIR}/deploy/systemd/quant-runner.timer" /etc/systemd/system/
 install -m 0644 "${INSTALL_DIR}/deploy/systemd/quant-scheduler.service" /etc/systemd/system/
+# Live-mode unit ships but stays disabled until the operator flips
+# QUANT_ENV=live in .env and swaps enables via `make live-switch`.
+install -m 0644 "${INSTALL_DIR}/deploy/systemd/quant-runner-live.service" /etc/systemd/system/
 systemctl daemon-reload
 
 case "${DEPLOY_SYSTEMD}" in

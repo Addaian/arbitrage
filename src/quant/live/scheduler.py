@@ -107,9 +107,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="quant.live.scheduler")
     parser.add_argument(
         "--broker",
-        choices=["paper", "alpaca-paper"],
+        choices=["paper", "alpaca-paper", "alpaca-live"],
         default="alpaca-paper",
-        help="paper = local simulator; alpaca-paper = Alpaca paper API (default)",
+        help=(
+            "paper = local simulator; "
+            "alpaca-paper = Alpaca paper API (default); "
+            "alpaca-live = REAL MONEY (requires QUANT_ENV=live in .env)"
+        ),
     )
     parser.add_argument(
         "--persist", action="store_true", default=True, help="write cycle state to Postgres"

@@ -1,4 +1,4 @@
-.PHONY: help install sync test test-unit test-integration cov lint format typecheck check up down db-shell clean precommit-install paper-run paper-dry review
+.PHONY: help install sync test test-unit test-integration cov lint format typecheck check up down db-shell clean precommit-install paper-run paper-dry review preflight-live live-dry live-run live-switch paper-switch
 
 help:
 	@echo "Common targets:"
@@ -15,6 +15,11 @@ help:
 	@echo "  paper-run        - start the scheduler against Alpaca paper (blocks)"
 	@echo "  paper-dry        - one-shot dry-run cycle against Alpaca paper"
 	@echo "  review           - print the daily-review dashboard from Postgres"
+	@echo "  preflight-live   - run pre-live gate (Wave 20)"
+	@echo "  live-dry         - one-shot dry-run cycle against Alpaca LIVE"
+	@echo "  live-run         - one live cycle (persisted) — intended as systemd entrypoint"
+	@echo "  live-switch      - paper -> live systemd flip (requires sudo)"
+	@echo "  paper-switch     - live -> paper revert (requires sudo)"
 
 install sync:
 	uv sync --extra dev
@@ -73,3 +78,35 @@ paper-dry:
 
 review:
 	uv run python scripts/review.py
+
+# --- Live-trading operations (Wave 20) ----------------------------------
+
+# Sanity-check every gate before flipping systemd to real-money mode.
+# Refuses to pass unless QUANT_ENV=live, creds are live, killswitch
+# clear, paper PnL recent, and live Alpaca account has >=$100 equity.
+preflight-live:
+	uv run python scripts/preflight_live.py
+
+# One-shot live cycle, for smoke-testing immediately after the flip.
+# Per PRD §6.1 all risk limits still apply.
+live-dry:
+	uv run python -m quant.live.runner --broker alpaca-live --dry-run
+
+live-run:
+	uv run python -m quant.live.runner --broker alpaca-live --persist
+
+# Operator's paper→live flip. Requires sudo (systemd unit edits).
+live-switch:
+	@echo "Paper -> live flip. Pre-flight first:"
+	$(MAKE) preflight-live
+	@echo
+	@echo "Pre-flight OK. Swapping systemd units:"
+	sudo systemctl disable --now quant-runner.timer
+	sudo systemctl enable --now quant-runner-live.service
+	sudo systemctl status --no-pager quant-runner-live.service
+
+# Revert live -> paper, e.g. after failing Gate 4.
+paper-switch:
+	sudo systemctl disable --now quant-runner-live.service
+	sudo systemctl enable --now quant-runner.timer
+	sudo systemctl status --no-pager quant-runner.timer
