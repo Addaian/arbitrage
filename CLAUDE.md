@@ -25,8 +25,8 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 16 — Vol targeting (complete, awaiting commit)
-**Next wave:** 17 — VPS provisioning + systemd
+**Current wave:** 17 — VPS provisioning + systemd (complete, awaiting commit + operational bootstrap)
+**Next wave:** 18 — Monitoring + 30-day paper qualifier (Gate 3)
 
 ### Completed
 - **Wave 1 (Week 1)** — project scaffold, CI, smoke test
@@ -45,6 +45,7 @@ Do not run `git commit` or `git push` unless explicitly asked.
 - **Wave 14 (Week 14)** — generic strategy validator (`scripts/validate_new_strategy.py`) produces per-strategy markdown reports with PASS/FAIL exit codes. CI gate (`scripts/check_strategy_artifacts.py` + new CI job) blocks PRs that touch `src/quant/signals/` without updating `docs/strategies/`. Acceptance verified: deliberately bad inverse-momentum strategy → exit 1 + FAIL verdict; signal-only diff → CI gate exit 1. Fresh validation artifacts for all 3 surviving strategies generated. 349/349 tests green.
 - **Wave 15 (Week 15)** — `RegimeHMM` 3-state Gaussian HMM on SPY weekly features (log-return, 5w vol, 5w/20w vol ratio). State-label stabilisation: highest-vol=stress, lowest=calm. `regime_multiplier`/`regime_weighted_multiplier` + `apply_regime_overlay` in `portfolio/sizing.py`. `scripts/train_regime.py` weekly retrain → `data/models/regime_latest.joblib`. **Known-state recovery 80%+ on synthetic (plan acceptance). Trend-only acceptance: overlay reduces max DD by 23.7% (target ≥20%), CAGR -7.6% (target <15%), Sharpe 0.749→0.774, Calmar 0.35→0.42.** Real-data stress flags exactly 2008/2009/2020 weeks — no false positives. Combined-portfolio overlay misses acceptance because max DD (2015-16) is in neutral-vol regime; flagged for Wave 16 vol-target composition. 373/373 tests green.
 - **Wave 16 (Week 16)** — `EWMAVolForecaster` (RiskMetrics λ=0.94, stateful + batch) + `vol_target_multiplier`. Combined overlay composes multiplicatively with Wave-15 regime. **Acceptance cleared**: combined 3-strategy baseline already runs at 9.14% realized vol (8.6% dev from 10% target — passes "within 20%"). Vol-target overlay applied on momentum alone cuts max DD in half (-35% → -17.5%), lands vol on target (5.6% dev), Sharpe up 0.69 → 0.80, Calmar +63%. 388/388 tests green. **Sophistication phase complete; Phase 5 production deployment next.**
+- **Wave 17 (Week 17)** — production VPS deployment kit. `deploy/systemd/` has three hardened units: `quant-runner.service` (oneshot cycle, `NoNewPrivileges`/`ProtectSystem=strict`/etc), `quant-runner.timer` (`Mon..Fri 15:45 America/New_York`, `Persistent=true`), and `quant-scheduler.service` (alternative daemon mode). `deploy/bootstrap.sh` is one-command idempotent Ubuntu 24.04 setup (UFW, fail2ban, unattended-upgrades, Postgres native, `uv`, clone, migrations, systemd install). `deploy/README.md` is the operator runbook. 24 guardrail tests enforce syntax + hardening + runner-bootstrap consistency. 412/412 tests green. **Operational handoff to user:** cold-boot Hetzner, run bootstrap, smoke-test — target &lt;30min per plan acceptance.
 
 ### In progress
 - _none_

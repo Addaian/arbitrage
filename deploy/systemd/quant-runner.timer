@@ -1,0 +1,26 @@
+# Trigger quant-runner.service at 3:45pm America/New_York on trading
+# weekdays. The timezone is specified inline so it survives DST
+# correctly regardless of the VPS's system timezone (requires systemd
+# 245+; Ubuntu 24.04 ships with 255+).
+#
+# Holidays are NOT filtered here — the broker will reject orders when
+# the market is closed; that bubbles up as a cycle error in the runner.
+#
+# Install target: /etc/systemd/system/quant-runner.timer
+# Enable: systemctl enable --now quant-runner.timer
+# Inspect: systemctl list-timers quant-runner.timer
+
+[Unit]
+Description=quant-system daily paper cycle timer (3:45pm ET Mon-Fri)
+
+[Timer]
+# PRD §4.2: 3:45pm ET = 15min before the 4:00pm NYSE close.
+OnCalendar=Mon..Fri 15:45 America/New_York
+AccuracySec=30s
+# If the VPS was down when the timer was supposed to fire, run
+# once as soon as it comes back up. Prevents missed cycles on reboot.
+Persistent=true
+Unit=quant-runner.service
+
+[Install]
+WantedBy=timers.target

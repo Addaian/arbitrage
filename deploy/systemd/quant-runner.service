@@ -1,0 +1,48 @@
+# One-shot daily trading cycle. Triggered by quant-runner.timer at
+# 3:45pm America/New_York on trading weekdays (the timer enforces the
+# schedule, not the service itself).
+#
+# Install target: /etc/systemd/system/quant-runner.service
+# Enable: systemctl enable --now quant-runner.timer
+# Inspect: journalctl -u quant-runner.service --since "1 hour ago"
+
+[Unit]
+Description=quant-system daily paper cycle (one-shot)
+Documentation=https://github.com/Addaian/arbitrage
+# Require Postgres to be up — we need to persist signals / orders / pnl.
+Requires=postgresql.service
+After=postgresql.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=quant
+Group=quant
+WorkingDirectory=/opt/quant-system
+EnvironmentFile=/opt/quant-system/.env
+# --broker alpaca-paper until go-live; --persist writes to Postgres.
+ExecStart=/usr/local/bin/uv run python -m quant.live.runner --broker alpaca-paper --persist
+
+# Hard timeout — a single cycle must complete within 10 minutes.
+TimeoutStartSec=600
+
+# Security hardening.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/quant-system/data
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+# Log to journald with identifiable tag.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=quant-runner
+
+[Install]
+WantedBy=multi-user.target

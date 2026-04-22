@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 17 — Week 17: VPS provisioning + systemd] — 2026-04-22
+
+### Added
+- `deploy/systemd/quant-runner.service` — oneshot daily cycle. Runs as the `quant` system user, requires `postgresql.service`, `EnvironmentFile=/opt/quant-system/.env`, hardened (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp`, `ReadWritePaths=/opt/quant-system/data`, `RestrictSUIDSGID`, `LockPersonality`), 10-min timeout, journald logging with `SyslogIdentifier=quant-runner`.
+- `deploy/systemd/quant-runner.timer` — cron trigger `Mon..Fri 15:45 America/New_York` (inline timezone survives DST; requires systemd 245+, Ubuntu 24.04 ships 255+). `Persistent=true` so a cycle missed while the VPS was down fires on reboot.
+- `deploy/systemd/quant-scheduler.service` — alternative deployment mode: long-running `quant.live.scheduler` daemon (Type=simple, Restart=on-failure) for operators who prefer in-process scheduling over systemd cron. Mutually exclusive with the timer mode.
+- `deploy/bootstrap.sh` — one-command idempotent Ubuntu 24.04 bootstrap (~300 lines). Installs base packages, sets timezone, enables unattended-upgrades, configures UFW (deny-incoming + SSH + Grafana:3000), enables fail2ban, installs `uv`, creates Postgres role + DB + TimescaleDB extension, creates `quant` system user + `/opt/quant-system`, clones/pulls the repo, `uv sync`, writes an `.env` template (chmod 600), runs `alembic upgrade head`, installs all systemd units, enables the selected deployment mode (`timer` default / `scheduler` alt). Strict-bash (`set -euo pipefail`), refuses to run without `POSTGRES_PASSWORD` in env.
+- `deploy/README.md` — operator runbook: hardware picks (Hetzner CX22 ARM €3.29/mo or CPX21 x86 €4.15/mo), one-shot bootstrap instructions, post-bootstrap secret-fill checklist, deployment-mode comparison (`timer` vs `scheduler`), kill-switch drill, rolling back a bad release, Hetzner recovery-mode notes, backup strategy placeholder for Wave 18.
+- `tests/unit/test_deploy_scripts.py` (24 tests) — CI guardrails on the deploy-layer:
+  - `bootstrap.sh` exists + executable, has `#!/usr/bin/env bash` + `set -euo pipefail`, refuses to run without `POSTGRES_PASSWORD`, passes `bash -n` syntax check, configures UFW + fail2ban + America/New_York + chmod-600 `.env`.
+  - Every systemd unit parses as valid INI, runs as `quant` user, has the hardening directives, `ExecStart` matches the intended Python module, timer fires `Mon..Fri 15:45 America/New_York` with `Persistent=true`.
+  - **Structural invariant:** any `.service` or `.timer` file in `deploy/systemd/` must be referenced by `bootstrap.sh` (catches the classic bug of adding a new unit and forgetting to wire it into the installer).
+
+### Verified
+- **412/412 tests passing** (+1 skipped). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- `bash -n deploy/bootstrap.sh` parses cleanly; no dead branches; all unit files referenced.
+
+### Operational handoff — user's next actions
+
+This wave's code is complete; the actual acceptance ("cold-booted fresh VPS can be brought to running state in <30 minutes via bootstrap.sh") is an operational step the user performs on real Hetzner hardware, not something I can execute from the dev machine. The sequence per `deploy/README.md`:
+
+1. Provision Hetzner CX22 (ARM) or CPX21 (x86), Ubuntu 24.04, add SSH key, record IP.
+2. SSH in as root, run `curl … bootstrap.sh | ...`. Time it.
+3. Fill in `.env` (Alpaca + Discord + Sentry).
+4. `systemctl restart quant-runner.timer`.
+5. Smoke-test dry-run cycle + kill-switch drill.
+6. Verify `systemctl list-timers quant-runner.timer` shows next fire at 3:45pm ET on the next trading weekday.
+
+Record the wall-clock time of step 2 in `docs/journal.md`; anything over 30 min is a bug in `bootstrap.sh` for this wave to close.
+
 ## [Wave 16 — Week 16: Volatility targeting] — 2026-04-22
 
 ### Added

@@ -1,0 +1,54 @@
+# Alternative deployment: a long-running APScheduler daemon that
+# handles the cron itself inside the Python process. Use this OR the
+# quant-runner.timer, not both — they'd cause double-firing.
+#
+# When to prefer this:
+#   - You want a single persistent process to own the lifecycle
+#     (e.g. for in-process caching, state that's expensive to rehydrate).
+#   - Sub-second timing precision matters (unlikely for daily bars).
+#
+# When to prefer the timer (default):
+#   - systemd handles restarts, missed runs, and timezone conversion.
+#   - Deploy pattern is more aligned with classical cron.
+#
+# Install target: /etc/systemd/system/quant-scheduler.service
+
+[Unit]
+Description=quant-system APScheduler daemon (alternative to quant-runner.timer)
+Documentation=https://github.com/Addaian/arbitrage
+Requires=postgresql.service
+After=postgresql.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quant
+Group=quant
+WorkingDirectory=/opt/quant-system
+EnvironmentFile=/opt/quant-system/.env
+ExecStart=/usr/local/bin/uv run python -m quant.live.scheduler --broker alpaca-paper --persist
+Restart=on-failure
+RestartSec=30s
+# Kill the Python scheduler if it hangs for more than 5 minutes during
+# graceful shutdown.
+TimeoutStopSec=300
+
+# Security hardening.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/quant-system/data
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=quant-scheduler
+
+[Install]
+WantedBy=multi-user.target
