@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  # The Python `prometheus_client` HTTP server bound to the VPS host,
+  # reached via Docker's host-gateway alias.
+  - job_name: quant-runner
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - host.docker.internal:9000
+        labels:
+          service: quant-runner
+          environment: paper
+
+  # Prometheus scrapes itself so the dashboard can show ingestion health.
+  - job_name: prometheus
+    scrape_interval: 30s
+    static_configs:
+      - targets:
+          - localhost:9090

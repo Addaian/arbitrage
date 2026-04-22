@@ -1,0 +1,79 @@
+groups:
+  - name: quant-system-prd-6-3
+    # Every rule here maps 1:1 to a row in PRD §6.3's "Monitoring alerts"
+    # table. If that table grows, this file grows with it, and the
+    # `tests/unit/test_monitoring.py::test_alerts_yml_covers_prd_6_3`
+    # guard fires in CI if they drift.
+    rules:
+      - alert: OrderRejectedByBroker
+        expr: increase(quant_order_submit_total{result="rejected"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          prd_row: 1
+        annotations:
+          summary: "broker rejected {{ $value }} order(s) in last 15m"
+          description: "Strategy/side labels on the counter show which flow."
+
+      - alert: DailyLossWarning
+        expr: quant_daily_return <= -0.03
+        for: 5m
+        labels:
+          severity: warning
+          prd_row: 2
+        annotations:
+          summary: "daily return below -3%: currently {{ $value | humanizePercentage }}"
+          description: "At -5% the killswitch engages automatically (see DailyLossCritical)."
+
+      - alert: DailyLossCritical
+        expr: quant_daily_return <= -0.05
+        for: 1m
+        labels:
+          severity: critical
+          prd_row: 3
+        annotations:
+          summary: "daily loss breach: {{ $value | humanizePercentage }} — killswitch engaging"
+          description: "See runbook: verify positions flatten, confirm 24h halt in place."
+
+      # Plan flags "Paper vs live tracking error > 50% over 30 days" — this
+      # is evaluated off-stream by the research-sprint tooling rather than
+      # by Prometheus (rolling 30d is too coarse for a 15s scrape). A
+      # placeholder rule here so ops knows the slot exists.
+      - alert: PaperLiveTrackingError
+        expr: absent(quant_paper_vs_live_sharpe_ratio) == 1
+        for: 30m
+        labels:
+          severity: warning
+          prd_row: 4
+        annotations:
+          summary: "paper-vs-live Sharpe ratio metric missing (Wave 19 ships the exporter)"
+
+      - alert: HeartbeatMissing
+        expr: (time() - quant_heartbeat_seconds) > 1800
+        for: 0m
+        labels:
+          severity: critical
+          prd_row: 5
+        annotations:
+          summary: "no successful cycle for {{ $value | humanizeDuration }}"
+          description: "Runner may be wedged. Check systemctl status quant-runner + journalctl."
+
+      - alert: CycleErrorSpike
+        expr: increase(quant_cycle_errors_total[1h]) >= 2
+        for: 0m
+        labels:
+          severity: critical
+          prd_row: 6
+        annotations:
+          summary: "{{ $value }} cycles errored in last hour — Sentry should have the exceptions"
+          description: "Sentry triage: check the project's unresolved issues queue."
+
+      - alert: NTPClockDrift
+        expr: absent(node_timex_sync_status) == 1
+        for: 15m
+        labels:
+          severity: critical
+          prd_row: 7
+        annotations:
+          summary: "no node_exporter timex metric — install node_exporter or ignore on non-node hosts"
+          description: "Alpaca rejects signed orders more than 500ms off wall-clock."

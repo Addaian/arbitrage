@@ -6,6 +6,72 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Wave 18 — Week 18: Monitoring + 30-day paper qualifier] — 2026-04-22
+
+### Added
+
+**Observability code (Python):**
+- `src/quant/monitoring/metrics.py` — single source of truth for every Prometheus metric. Catalogue: `quant_equity_usd`, `quant_cash_usd`, `quant_daily_return`, `quant_rolling_30d_sharpe`, `quant_position_count`, `quant_position_value_usd{symbol}`, `quant_order_submit_total{strategy,side,result}`, `quant_order_latency_seconds{strategy}` (histogram), `quant_cycle_duration_seconds` (histogram), `quant_cycle_errors_total`, `quant_heartbeat_seconds` (unix ts of last success), `quant_killswitch_engaged`. Helpers `record_cycle_success`, `record_cycle_error`, `record_order_submit`, `record_killswitch_state`, `set_position_values`. `start_exporter(port=9000)` starts the HTTP `/metrics` endpoint. `reset_metrics_registry()` rebuilds the registry for test isolation.
+- `src/quant/monitoring/sentry.py` — `init_sentry(settings)` no-ops without DSN; on init disables default integrations + sample rate so only unhandled exceptions ship. `capture_cycle_exception(exc)` wrapper used in the runner's try/except.
+- `src/quant/live/notifier.py` — extended `DiscordNotifier.alert(severity, title, details=None)` + `AlertSeverity` enum (INFO/WARNING/CRITICAL). Emoji-prefixed messages per severity so on-call triages from a phone notification.
+- `src/quant/live/runner.py` — `LiveRunner.run_daily_cycle()` now wraps the cycle with timing + metric emission (success path records equity/cash/position-count/duration/position-values; failure path increments `cycle_errors_total` and ships exception to Sentry).
+
+**Infra (Docker + config):**
+- `deploy/prometheus/docker-compose.yml` — Prometheus 3.1 (180d retention, localhost-only), Alertmanager 0.28 (localhost-only), Grafana 11.4 (:3000, dashboard provisioning). `host.docker.internal:host-gateway` so Prometheus scrapes the runner's exporter on the VPS host.
+- `deploy/prometheus/prometheus.yml` — scrapes `host.docker.internal:9000` every 15s with labels `service=quant-runner, environment=paper`.
+- `deploy/prometheus/alerts.yml` — every row of PRD §6.3 wired into an alert rule, tagged with `prd_row` label so CI can verify coverage: OrderRejectedByBroker (warning), DailyLossWarning @ -3% (warning), DailyLossCritical @ -5% (critical), PaperLiveTrackingError (warning, placeholder for W19), HeartbeatMissing @ 30min (critical), CycleErrorSpike ≥ 2/h (critical), NTPClockDrift (critical).
+- `deploy/prometheus/alertmanager.yml` — routes to Discord webhook (env-substituted `${DISCORD_WEBHOOK_URL}`) with separate receivers for warning (6h repeat) vs critical (30min repeat). Inhibit rule so critical suppresses its warning twin.
+- `deploy/prometheus/grafana/provisioning/{datasources,dashboards}/` — auto-provision the Prometheus datasource and dashboard loader at container boot.
+- `deploy/prometheus/grafana/dashboards/quant-system.json` — 7 panels: equity curve, per-symbol position value, daily return, rolling 30d Sharpe (stat), cycle duration p50/p95, cycle errors 1h/24h, killswitch indicator.
+
+**Tests:**
+- `tests/unit/test_monitoring.py` (19 tests) — metric recording round-trips (counter/gauge/histogram/labels), registry reset isolation, unknown-metric guard, Sentry no-op on missing DSN + blank DSN, alert severity enum + Discord-webhook rendering (monkey-patched), every config file parses, **every PRD §6.3 row has an alert rule** (by `prd_row` label), DailyLossCritical matches -5%, Docker Compose stack + Grafana datasource + dashboard panels all structurally correct.
+
+### Verified
+- **431/431 tests passing** (+1 skipped). Ruff clean, format clean, mypy strict clean on risk/execution/portfolio.
+- Every existing LiveRunner test still passes after the metric-emission + Sentry hook additions.
+
+### Operational handoff — 30-day paper qualifier starts now
+
+The plan says: *"Start the 30-day paper qualifier window on Monday of week 18"* and *"Daily: review dashboard, note anomalies in docs/journal.md."* This is the clock that feeds Gate 3 (Week 19).
+
+Operator checklist:
+
+1. SSH into the Hetzner VPS provisioned in Wave 17.
+2. `cd /opt/quant-system && git pull` (picks up this wave's code + configs).
+3. Restart the runner so it picks up the new metrics emission:
+   `systemctl restart quant-runner.timer` (or `quant-scheduler.service`).
+4. Verify the runner exporter is reachable:
+   `curl -s http://localhost:9000/metrics | grep quant_ | head -20`.
+5. Populate the env vars the observability stack reads:
+   `export DISCORD_WEBHOOK_URL=...` (for Alertmanager),
+   `export GRAFANA_ADMIN_PASSWORD=...` (initial Grafana admin).
+6. Start the stack:
+   `cd /opt/quant-system/deploy/prometheus && docker compose up -d`.
+7. Open `http://<vps-ip>:3000/`, log in, verify the dashboard renders.
+8. Touch the killswitch, run one cycle, verify the alert fires in Discord
+   (engaging the switch sets `quant_killswitch_engaged=1` which no current alert watches
+   — future rule if desired; for now it's on the dashboard).
+9. Add a per-day line to `docs/journal.md` as per the Wave-9 template.
+
+Start the 30-day clock the first trading Monday after the stack is
+green. Qualifier exits at Gate 3 (Wave 19): 30-day paper Sharpe within
+50% of backtest Sharpe, zero unresolved critical alerts.
+
+### Notes
+
+- The rolling-30d Sharpe gauge is defined in the metrics catalogue
+  but **not yet written** — the runner currently has per-cycle data but
+  not a 30-day rolling reducer. Wave 19 ships the computation (paper
+  qualifier explicitly needs this number).
+- Grafana's dashboard JSON is committed as a v1 — hand-tuned on the
+  VPS will diverge over time; that's fine. Re-commit when the layout
+  stabilises.
+- Alertmanager expects `DISCORD_WEBHOOK_URL` from the environment at
+  container start. Put it in `.env` next to the runner's, and make
+  sure `docker compose --env-file` (or `docker compose up` with the
+  right working dir) picks it up.
+
 ## [Wave 17 — Week 17: VPS provisioning + systemd] — 2026-04-22
 
 ### Added

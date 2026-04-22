@@ -1,4 +1,4 @@
-"""Discord webhook notifier for the daily cycle.
+"""Discord webhook notifier for the daily cycle + PRD §6.3 alerts.
 
 Wraps `discord-webhook` with a tiny, async-friendly surface. All methods
 silently no-op when no webhook URL is configured — that's the default
@@ -11,6 +11,7 @@ raised: a monitoring problem must not block the trading cycle.
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from discord_webhook import DiscordWebhook
@@ -18,6 +19,23 @@ from loguru import logger
 
 if TYPE_CHECKING:
     from quant.live.runner import CycleResult
+
+
+class AlertSeverity(StrEnum):
+    """Alert severity per PRD §6.3. Maps to the Discord emoji prefix
+    so on-call can triage at a glance from a phone notification.
+    """
+
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+_SEVERITY_PREFIX: dict[AlertSeverity, str] = {
+    AlertSeverity.INFO: ":information_source:",
+    AlertSeverity.WARNING: ":warning:",
+    AlertSeverity.CRITICAL: ":rotating_light:",
+}
 
 
 class DiscordNotifier:
@@ -46,6 +64,23 @@ class DiscordNotifier:
 
     def cycle_error(self, strategy: str, message: str) -> None:
         self._send(f":red_circle: cycle error · {strategy}\n`{message}`")
+
+    def alert(
+        self,
+        severity: AlertSeverity,
+        title: str,
+        *,
+        details: str | None = None,
+    ) -> None:
+        """Send a severity-tagged alert (PRD §6.3). Used for events
+        outside the cycle-start/complete/error flow — daily-loss
+        warnings, kill-switch engagement, NTP drift, etc.
+        """
+        prefix = _SEVERITY_PREFIX[severity]
+        body = f"{prefix} **{severity.value.upper()}** · {title}"
+        if details:
+            body = f"{body}\n```{details}```"
+        self._send(body)
 
     def _send(self, content: str) -> None:
         if not self._url:

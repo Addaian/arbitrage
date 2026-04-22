@@ -1,0 +1,151 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "enable": true,
+        "hide": false,
+        "iconColor": "red",
+        "name": "alerts",
+        "type": "alert"
+      }
+    ]
+  },
+  "description": "PRD §6.3 / Wave 18 runtime observability",
+  "editable": false,
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "title": "Equity curve",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "quant_equity_usd",
+          "legendFormat": "equity",
+          "refId": "A"
+        },
+        {
+          "expr": "quant_cash_usd",
+          "legendFormat": "cash",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "title": "Per-symbol position value",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "quant_position_value_usd",
+          "legendFormat": "{{symbol}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 3,
+      "title": "Daily return",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "quant_daily_return", "refId": "A"}
+      ]
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}}},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 4,
+      "title": "Rolling 30d Sharpe",
+      "type": "stat",
+      "targets": [
+        {"expr": "quant_rolling_30d_sharpe", "refId": "A"}
+      ]
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "s"
+        }
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "id": 5,
+      "title": "Cycle duration (p50 / p95)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(quant_cycle_duration_seconds_bucket[1h])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(quant_cycle_duration_seconds_bucket[1h])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}}},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "id": 6,
+      "title": "Cycle errors (1h / 24h)",
+      "type": "stat",
+      "targets": [
+        {"expr": "increase(quant_cycle_errors_total[1h])", "legendFormat": "1h", "refId": "A"},
+        {"expr": "increase(quant_cycle_errors_total[24h])", "legendFormat": "24h", "refId": "B"}
+      ]
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}}},
+      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 24},
+      "id": 7,
+      "title": "Killswitch",
+      "type": "stat",
+      "targets": [
+        {"expr": "quant_killswitch_engaged", "refId": "A"}
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["quant-system", "trading"],
+  "templating": {"list": []},
+  "time": {"from": "now-30d", "to": "now"},
+  "timezone": "America/New_York",
+  "title": "quant-system runtime",
+  "uid": "quant-runtime",
+  "version": 1,
+  "weekStart": ""
+}

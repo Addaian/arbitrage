@@ -1,0 +1,40 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: discord
+  group_by: [alertname]
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 6h
+  routes:
+    - matchers:
+        - severity = critical
+      receiver: discord-critical
+      repeat_interval: 30m
+    - matchers:
+        - severity = warning
+      receiver: discord
+      repeat_interval: 6h
+
+receivers:
+  - name: discord
+    webhook_configs:
+      - url: ${DISCORD_WEBHOOK_URL}
+        send_resolved: true
+  - name: discord-critical
+    # Same endpoint — the Discord channel is the pager. Severity is
+    # conveyed via the alert's own severity label, which the webhook
+    # template renders as an emoji prefix.
+    webhook_configs:
+      - url: ${DISCORD_WEBHOOK_URL}
+        send_resolved: true
+
+inhibit_rules:
+  # A `critical` firing for the same alertname suppresses the noisier
+  # `warning` version — e.g. DailyLossCritical inhibits DailyLossWarning.
+  - source_matchers:
+      - severity = critical
+    target_matchers:
+      - severity = warning
+    equal: [alertname]

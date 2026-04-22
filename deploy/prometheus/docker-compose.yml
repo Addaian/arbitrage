@@ -1,0 +1,68 @@
+# Observability stack: Prometheus + Grafana + Alertmanager.
+# Intended to run on the same Hetzner VPS as the trading runner.
+#
+# Deploy:  cd /opt/quant-system/deploy/prometheus && docker compose up -d
+# Inspect: docker compose ps / logs <service>
+# Ports:
+#   - Prometheus 9090  (local only via host firewall; scraped by Grafana)
+#   - Grafana    3000  (exposed via UFW rule from deploy/bootstrap.sh)
+#   - Alertmgr   9093  (local only)
+#
+# The trading runner exports metrics on host:9000 via prometheus_client —
+# Prometheus scrapes that using `host.docker.internal` (Linux host-gateway).
+services:
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: quant-prometheus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=180d
+      - --web.enable-lifecycle
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    container_name: quant-alertmanager
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: quant-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      # Admin password MUST be overridden via /opt/quant-system/.env
+      # (GRAFANA_ADMIN_PASSWORD=...) before bringing the stack up.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: ""
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:

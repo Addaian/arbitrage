@@ -25,8 +25,8 @@ Do not run `git commit` or `git push` unless explicitly asked.
 
 ## Status
 
-**Current wave:** 17 — VPS provisioning + systemd (complete, awaiting commit + operational bootstrap)
-**Next wave:** 18 — Monitoring + 30-day paper qualifier (Gate 3)
+**Current wave:** 18 — Monitoring + 30-day paper qualifier (complete, awaiting commit + operational 30-day run)
+**Next wave:** 19 — Final pre-live checks (Gate 3)
 
 ### Completed
 - **Wave 1 (Week 1)** — project scaffold, CI, smoke test
@@ -46,6 +46,7 @@ Do not run `git commit` or `git push` unless explicitly asked.
 - **Wave 15 (Week 15)** — `RegimeHMM` 3-state Gaussian HMM on SPY weekly features (log-return, 5w vol, 5w/20w vol ratio). State-label stabilisation: highest-vol=stress, lowest=calm. `regime_multiplier`/`regime_weighted_multiplier` + `apply_regime_overlay` in `portfolio/sizing.py`. `scripts/train_regime.py` weekly retrain → `data/models/regime_latest.joblib`. **Known-state recovery 80%+ on synthetic (plan acceptance). Trend-only acceptance: overlay reduces max DD by 23.7% (target ≥20%), CAGR -7.6% (target <15%), Sharpe 0.749→0.774, Calmar 0.35→0.42.** Real-data stress flags exactly 2008/2009/2020 weeks — no false positives. Combined-portfolio overlay misses acceptance because max DD (2015-16) is in neutral-vol regime; flagged for Wave 16 vol-target composition. 373/373 tests green.
 - **Wave 16 (Week 16)** — `EWMAVolForecaster` (RiskMetrics λ=0.94, stateful + batch) + `vol_target_multiplier`. Combined overlay composes multiplicatively with Wave-15 regime. **Acceptance cleared**: combined 3-strategy baseline already runs at 9.14% realized vol (8.6% dev from 10% target — passes "within 20%"). Vol-target overlay applied on momentum alone cuts max DD in half (-35% → -17.5%), lands vol on target (5.6% dev), Sharpe up 0.69 → 0.80, Calmar +63%. 388/388 tests green. **Sophistication phase complete; Phase 5 production deployment next.**
 - **Wave 17 (Week 17)** — production VPS deployment kit. `deploy/systemd/` has three hardened units: `quant-runner.service` (oneshot cycle, `NoNewPrivileges`/`ProtectSystem=strict`/etc), `quant-runner.timer` (`Mon..Fri 15:45 America/New_York`, `Persistent=true`), and `quant-scheduler.service` (alternative daemon mode). `deploy/bootstrap.sh` is one-command idempotent Ubuntu 24.04 setup (UFW, fail2ban, unattended-upgrades, Postgres native, `uv`, clone, migrations, systemd install). `deploy/README.md` is the operator runbook. 24 guardrail tests enforce syntax + hardening + runner-bootstrap consistency. 412/412 tests green. **Operational handoff to user:** cold-boot Hetzner, run bootstrap, smoke-test — target &lt;30min per plan acceptance.
+- **Wave 18 (Week 18)** — observability stack. `quant.monitoring.metrics` exports 12 Prometheus metrics wired into `LiveRunner` cycle success/error paths. `quant.monitoring.sentry` + `DiscordNotifier.alert(severity, ...)` for exception routing. `deploy/prometheus/` has a Docker-Compose stack (Prometheus 3.1 + Alertmanager 0.28 + Grafana 11.4) with provisioned datasource + dashboard JSON (equity curve, position values, daily return, rolling Sharpe, cycle duration p50/p95, error counts, killswitch). Alert rules cover all 7 PRD §6.3 rows (test enforces coverage by `prd_row` label). 431/431 tests green. **Operational handoff:** VPS-side `docker compose up -d` in `deploy/prometheus/`, start the 30-day paper qualifier Monday of week 18 (feeds Gate 3 at Wave 19).
 
 ### In progress
 - _none_

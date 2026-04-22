@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -52,6 +53,13 @@ from quant.execution.broker_base import Broker
 from quant.execution.order_manager import OrderManager
 from quant.execution.paper_broker import PaperBroker
 from quant.live.notifier import DiscordNotifier
+from quant.monitoring.metrics import (
+    record_cycle_error,
+    record_cycle_success,
+    record_killswitch_state,
+    set_position_values,
+)
+from quant.monitoring.sentry import capture_cycle_exception
 from quant.risk.killswitch import Killswitch
 from quant.signals.base import SignalStrategy
 from quant.signals.trend import TrendSignal
@@ -153,6 +161,7 @@ class LiveRunner:
     async def run_daily_cycle(self, *, as_of: datetime | None = None) -> CycleResult:
         now = as_of or datetime.now(UTC)
         strategy_name = getattr(self._signal, "name", "strategy")
+        cycle_start = time.monotonic()
 
         try:
             self._notifier.cycle_start(strategy_name, now)
@@ -160,7 +169,9 @@ class LiveRunner:
             # Killswitch check — if engaged, flatten and exit. No signal
             # computation, no broker round-trips beyond the flatten, no
             # DB writes beyond the resulting position snapshot.
-            if self._killswitch is not None and self._killswitch.is_engaged():
+            killswitch_engaged = self._killswitch is not None and self._killswitch.is_engaged()
+            record_killswitch_state(killswitch_engaged)
+            if killswitch_engaged:
                 return await self._flatten_cycle(now=now, strategy_name=strategy_name)
 
             closes = self._closes_provider()
@@ -221,10 +232,24 @@ class LiveRunner:
             if self._session_factory is not None:
                 await self._persist(result, account=account)
 
+            # Metric emission — on the success path only, so cycle_errors
+            # tracks failure count cleanly.
+            record_cycle_success(
+                equity=float(account.equity),
+                cash=float(account.cash),
+                position_count=len([p for p in result.final_positions if p.qty != 0]),
+                duration_seconds=time.monotonic() - cycle_start,
+            )
+            set_position_values(
+                {p.symbol: float(p.market_value) for p in result.final_positions if p.qty != 0}
+            )
+
             self._notifier.cycle_complete(strategy_name, result)
             return result
 
         except Exception as exc:
+            record_cycle_error()
+            capture_cycle_exception(exc)
             msg = f"cycle failed: {exc}"
             self._notifier.cycle_error(strategy_name, msg)
             raise
