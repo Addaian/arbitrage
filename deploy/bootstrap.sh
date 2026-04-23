@@ -175,7 +175,7 @@ DISCORD_WEBHOOK_URL=
 SENTRY_DSN=
 SENTRY_ENVIRONMENT=paper
 QUANT_DATA_DIR=${INSTALL_DIR}/data
-QUANT_KILLSWITCH_FILE=/var/run/quant/HALT
+QUANT_KILLSWITCH_FILE=/var/lib/quant/HALT
 EOF
     chown "${QUANT_USER}:${QUANT_USER}" "${INSTALL_DIR}/.env"
     chmod 600 "${INSTALL_DIR}/.env"
@@ -183,9 +183,13 @@ else
     log ".env: already present — leaving alone"
 fi
 
-# Killswitch dir for the quant user.
-mkdir -p /var/run/quant
-chown "${QUANT_USER}:${QUANT_USER}" /var/run/quant
+# Killswitch dir for the quant user. Must be PERSISTENT (not tmpfs) —
+# `/var/run` / `/run` is tmpfs on Ubuntu, so a HALT file there would
+# evaporate on reboot and trading would silently resume on an account
+# the operator had deliberately halted.
+mkdir -p /var/lib/quant
+chown "${QUANT_USER}:${QUANT_USER}" /var/lib/quant
+chmod 0750 /var/lib/quant
 
 # ---------- 11. Alembic migrations -----------------------------------
 

@@ -131,7 +131,7 @@ systemctl enable --now quant-scheduler.service
 - [ ] `journalctl -u quant-runner.service -n 50` — no startup errors
 - [ ] Dry-run cycle completes with a populated target-weights table
 - [ ] Kill-switch touch works:
-      `sudo -u quant touch /var/run/quant/HALT` then verify next cycle
+      `sudo -u quant touch /var/lib/quant/HALT` then verify next cycle
       flattens and exits; remove the file to resume.
 
 Target: all boxes checked within **30 minutes** of initial SSH.
@@ -140,7 +140,7 @@ Target: all boxes checked within **30 minutes** of initial SSH.
 
 - **Stop the live cycle:** `systemctl stop quant-runner.timer` (or
   `quant-scheduler.service`).
-- **Engage the kill switch:** `touch /var/run/quant/HALT`. The next
+- **Engage the kill switch:** `touch /var/lib/quant/HALT`. The next
   cycle (whether from the timer or the running scheduler) flattens all
   positions and exits.
 - **Downgrade a bad release:** `sudo -u quant git -C /opt/quant-system

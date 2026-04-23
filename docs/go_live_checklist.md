@@ -52,7 +52,7 @@ Per `docs/disaster_recovery.md`, run Scenario 1 end-to-end.
 The mechanism is tested in `tests/unit/test_killswitch_chaos.py` —
 drill it against live paper now.
 
-- [ ] SSH in, `sudo -u quant touch /var/run/quant/HALT`
+- [ ] SSH in, `sudo -u quant touch /var/lib/quant/HALT`
 - [ ] Next cycle (wait or trigger manually) flattens every open position
 - [ ] `journalctl -u quant-runner.service --since "5 minutes ago"`
       confirms the `killswitch engaged — flattening` message

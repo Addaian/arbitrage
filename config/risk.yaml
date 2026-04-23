@@ -7,4 +7,4 @@ max_order_size_pct: 0.20         # reject, require override
 max_price_deviation_pct: 0.01    # reject, re-price
 target_annual_vol: 0.10          # portfolio-level target (10%)
 max_gross_exposure: 1.0          # no leverage in V1
-killswitch_file: /var/run/quant/HALT
+killswitch_file: /var/lib/quant/HALT  # persistent — survives reboot

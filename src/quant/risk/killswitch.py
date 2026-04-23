@@ -1,6 +1,6 @@
 """File-sentinel kill switch (PRD §6.2).
 
-A file at a configured path — default `/var/run/quant/HALT`. If it
+A file at a configured path — default `/var/lib/quant/HALT`. If it
 exists, the system flattens all positions and refuses to submit any
 new orders. Resetting requires deliberate removal of the file by an
 operator.
@@ -17,7 +17,7 @@ Design:
 
 The file sentinel pattern is chosen over a process signal or DB flag
 because it's:
-1. Trivially inspectable via `ls /var/run/quant/HALT`.
+1. Trivially inspectable via `ls /var/lib/quant/HALT`.
 2. Trivially toggleable via `touch` / `rm`.
 3. Survives process restarts — matches PRD §6.2 which says "halts
    until file removed".

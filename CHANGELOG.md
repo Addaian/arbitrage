@@ -6,6 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Post-Wave-20: security-review fixes] — 2026-04-23
+
+Two HIGH-severity findings surfaced by the `security-review` skill on the
+live-capital code path. Both fixed with regression tests. No new
+features; this is purely a before-you-touch-real-money hardening pass.
+
+### Fixed
+
+**Vuln 1 (HIGH, risk_bypass): live runner submitted orders with no pre-trade risk layer**
+
+`_build_default_runner` (`src/quant/live/runner.py`) constructed `OrderManager` without `risk_validator` or `killswitch` kwargs. `OrderManager._check_risk_limits` and `_check_killswitch` are no-ops when those hooks are `None`, so every live order bypassed PRD §6.1 hard limits (max order 20%, max position 30%, max price deviation 1%). The risk layer was 100%-covered + property-tested, yet **never wired in production**.
+
+Fix: load `RiskConfig` via `load_config_bundle()`, construct `RiskValidator(risk_cfg)` and `Killswitch(settings.quant_killswitch_file)`, pass both to `OrderManager`, and thread `account=` / `reference_price=` / `current_positions=` into the per-order `order_manager.execute(...)` calls in `LiveRunner.run_daily_cycle`. Killswitch also passed to `LiveRunner(killswitch=...)` so the cycle-start gate uses the same instance.
+
+**Vuln 2 (HIGH, kill_switch_evasion): kill-switch default path on tmpfs — evaporates on reboot**
+
+Default killswitch path was `/var/run/quant/HALT`. On Ubuntu, `/var/run` is a symlink to `/run` which is **tmpfs** — its contents are wiped on reboot. Monthly-drawdown flatten + halt → VPS reboots (kernel upgrade, panic, provider maintenance) → HALT file gone → `Killswitch.is_engaged()` returns False → trading silently resumes on an account the operator had deliberately halted.
+
+Fix: default moved to `/var/lib/quant/HALT` (persistent, root filesystem). Applied across `src/quant/config.py` (both `Settings.quant_killswitch_file` and `RiskConfig.killswitch_file`), `config/risk.yaml`, `.env.example`, `deploy/bootstrap.sh` (create + chown), the killswitch-module docstring, and all three systemd units' `ReadWritePaths=` lines. Operational docs (`deploy/README.md`, `docs/disaster_recovery.md`, `docs/go_live_checklist.md`) updated to match.
+
+### Added
+
+- `tests/unit/test_security_regressions.py` (7 tests) — locks in both fixes:
+  - `_build_default_runner` produces a runner whose `OrderManager` has both `risk_validator` and `killswitch` set.
+  - Validator is seeded with real `RiskConfig` caps, not a permissive default.
+  - `LiveRunner._killswitch` is non-None.
+  - `Settings().quant_killswitch_file` is NOT under any tmpfs prefix (`/run/`, `/var/run/`, `/tmp/`, `/dev/shm/`).
+  - `bootstrap.sh` creates `/var/lib/quant` + chowns to `${QUANT_USER}` and does NOT `mkdir` under `/run` or `/var/run`.
+  - Both `quant-runner.service` and `quant-runner-live.service` have `ReadWritePaths` that covers the killswitch dir (otherwise `ProtectSystem=strict` would block HALT writes from within the sandbox).
+- All 7 regression tests were written **before the fixes** and fail on HEAD as expected, then pass post-fix — they're the canary for re-introductions of either bug.
+
+### Verified
+- **473/473 tests passing** (+1 skipped doc test). Ruff clean, format clean, mypy strict clean.
+- Full existing test suite (466 tests) still green after the risk-validator was wired into the cycle — the new `account=` / `reference_price=` / `current_positions=` args to `OrderManager.execute` were already optional-with-default so existing callers didn't break.
+
+### Operator note
+
+Before running `make live-switch`, re-run `deploy/bootstrap.sh` on the VPS to:
+1. Create `/var/lib/quant/` with correct ownership.
+2. Install the updated `quant-runner-live.service` with the expanded `ReadWritePaths=`.
+3. Update `.env` so `QUANT_KILLSWITCH_FILE=/var/lib/quant/HALT` (bootstrap regenerates this line only if `.env` doesn't exist; edit it by hand otherwise).
+
+If an operator was mid-paper-run with the old `/var/run/quant/HALT` path, **the paper runner was also unprotected** by the risk layer — the same Vuln 1 applies. Paper losses are fake, but signal bugs that would have been caught by the risk layer weren't. Worth reviewing `docs/journal.md` for "larger than expected order" moments.
+
 ## [Wave 20 — Week 20: Go live (10% capital)] — 2026-04-22
 
 **Final wave of the 20-week V1 build.** Code side is complete; the

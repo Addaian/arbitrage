@@ -102,7 +102,7 @@ If the database is corrupted or got truncated but the VPS is fine:
 
 1. Engage the killswitch — the runner depends on DB writes:
    ```bash
-   sudo -u quant touch /var/run/quant/HALT
+   sudo -u quant touch /var/lib/quant/HALT
    ```
    Verify the next cycle flattens.
 2. Stop Postgres, snapshot the broken data dir (for forensics), drop it:
@@ -133,7 +133,7 @@ Wall-clock target: **<5 minutes**.
 1. Engage the killswitch first — before diagnosing anything, stop any
    ongoing damage:
    ```bash
-   sudo -u quant touch /var/run/quant/HALT
+   sudo -u quant touch /var/lib/quant/HALT
    ```
 2. `journalctl -u quant-runner.service --since "15 min ago"` to find
    the stuck point.

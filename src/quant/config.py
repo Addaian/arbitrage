@@ -68,7 +68,10 @@ class Settings(BaseSettings):
     quant_env: Literal["dev", "paper", "live"] = "dev"
     quant_log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     quant_data_dir: Path = Path("./data")
-    quant_killswitch_file: Path = Path("/var/run/quant/HALT")
+    # Persistent location — `/var/run` (alias of `/run`) is a tmpfs on
+    # Ubuntu, so a HALT file there evaporates on reboot and trading
+    # silently resumes. `/var/lib/quant` is on the root filesystem.
+    quant_killswitch_file: Path = Path("/var/lib/quant/HALT")
     quant_config_dir: Path = Path("./config")
 
     # Observability
@@ -160,7 +163,7 @@ class RiskConfig(_FrozenBase):
     max_price_deviation_pct: Annotated[float, Field(gt=0.0, le=0.01)] = 0.01
     target_annual_vol: Annotated[float, Field(ge=0.05, le=0.25)] = 0.10
     max_gross_exposure: Annotated[float, Field(ge=0.0, le=2.0)] = 1.0
-    killswitch_file: Path = Path("/var/run/quant/HALT")
+    killswitch_file: Path = Path("/var/lib/quant/HALT")
 
 
 # --- Loader --------------------------------------------------------------

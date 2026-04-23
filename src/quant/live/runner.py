@@ -49,7 +49,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from quant.backtest.deflated_sharpe import annualized_sharpe
-from quant.config import get_settings
+from quant.config import get_settings, load_config_bundle
 from quant.data.cache import CacheKey, ParquetBarCache
 from quant.execution.alpaca_broker import AlpacaBroker
 from quant.execution.broker_base import Broker
@@ -65,6 +65,7 @@ from quant.monitoring.metrics import (
 )
 from quant.monitoring.sentry import capture_cycle_exception
 from quant.risk.killswitch import Killswitch
+from quant.risk.limits import RiskValidator
 from quant.signals.base import SignalStrategy
 from quant.signals.trend import TrendSignal
 from quant.storage.db import get_sessionmaker
@@ -219,9 +220,21 @@ class LiveRunner:
                 self._notifier.cycle_complete(strategy_name, result)
                 return result
 
+            positions_list = list(current_positions.values())
             for plan in planned:
                 order = plan.as_order(strategy=strategy_name)
-                outcome = self._order_manager.execute(order, wait_for_fill=self._wait_for_fill)
+                # Feed the risk context to OrderManager so the
+                # pre-submit RiskValidator hook can enforce PRD §6.1
+                # hard limits per order (no-op when no validator is
+                # configured, but the default live runner always wires
+                # one).
+                outcome = self._order_manager.execute(
+                    order,
+                    wait_for_fill=self._wait_for_fill,
+                    account=account,
+                    reference_price=plan.reference_price,
+                    current_positions=positions_list,
+                )
                 result.submitted_orders.append(order)
                 result.fills_by_order[str(order.client_order_id)] = outcome.fills
 
@@ -539,10 +552,20 @@ def _build_default_runner(
     else:
         raise ValueError(f"unknown broker kind: {broker_kind!r}")
 
+    # Load the validated risk limits from config/risk.yaml so the
+    # pre-trade gate uses the same caps that the operator signed off on.
+    # PRD §6.1 caps are enforced at config-load time; a hand-constructed
+    # RiskConfig cannot loosen them further.
+    risk_cfg = load_config_bundle().risk
+    risk_validator = RiskValidator(risk_cfg)
+    killswitch = Killswitch(settings.quant_killswitch_file)
+
     om = OrderManager(
         broker,
         poll_timeout=300.0 if broker_kind != "paper" else 0.0,
         poll_interval=2.0 if broker_kind != "paper" else 0.0,
+        risk_validator=risk_validator,
+        killswitch=killswitch,
     )
     signal = TrendSignal(lookback_months=10, cash_symbol=cash_symbol)
 
@@ -560,6 +583,7 @@ def _build_default_runner(
         closes_provider=_closes_provider,
         session_factory=session_factory,
         notifier=notifier,
+        killswitch=killswitch,
         dry_run=dry_run,
     )
 
