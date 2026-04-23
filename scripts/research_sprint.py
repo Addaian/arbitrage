@@ -125,7 +125,9 @@ class StrategyEvalRow:
     returns_series_name: str  # for correlation tables
 
 
-def _eval_trend(closes_all: pd.DataFrame) -> tuple[pd.Series, StrategyEvalRow]:
+def _eval_trend(
+    closes_all: pd.DataFrame,
+) -> tuple[pd.Series, StrategyEvalRow, pd.DataFrame]:
     closes = closes_all[TREND_SYMBOLS]
     signal = TrendSignal(lookback_months=10, cash_symbol=CASH)
     weights = signal.target_weights(closes)
@@ -152,10 +154,12 @@ def _eval_trend(closes_all: pd.DataFrame) -> tuple[pd.Series, StrategyEvalRow]:
         regime_sharpes=regime,
         returns_series_name="trend",
     )
-    return result.returns, row
+    return result.returns, row, weights
 
 
-def _eval_momentum(closes_all: pd.DataFrame) -> tuple[pd.Series, StrategyEvalRow]:
+def _eval_momentum(
+    closes_all: pd.DataFrame,
+) -> tuple[pd.Series, StrategyEvalRow, pd.DataFrame]:
     closes = closes_all[MOMENTUM_SYMBOLS]
     signal = MomentumSignal(lookback_months=6, top_n=3, cash_symbol=CASH)
     weights = signal.target_weights(closes)
@@ -182,12 +186,12 @@ def _eval_momentum(closes_all: pd.DataFrame) -> tuple[pd.Series, StrategyEvalRow
         regime_sharpes=regime,
         returns_series_name="momentum",
     )
-    return result.returns, row
+    return result.returns, row, weights
 
 
 def _eval_mean_rev(
     closes_all: pd.DataFrame, highs_all: pd.DataFrame, lows_all: pd.DataFrame
-) -> tuple[pd.Series, StrategyEvalRow]:
+) -> tuple[pd.Series, StrategyEvalRow, pd.DataFrame]:
     closes = closes_all[MEAN_REV_SYMBOLS]
     highs = highs_all[MEAN_REV_SYMBOLS]
     lows = lows_all[MEAN_REV_SYMBOLS]
@@ -225,7 +229,7 @@ def _eval_mean_rev(
         regime_sharpes=regime,
         returns_series_name="mean_reversion",
     )
-    return result.returns, row
+    return result.returns, row, weights
 
 
 # --- Helpers -----------------------------------------------------------
@@ -383,9 +387,9 @@ def run(
         f"({len(closes)} bars, {len(universe)} symbols)"
     )
 
-    r_trend, trend_row = _eval_trend(closes)
-    r_mom, mom_row = _eval_momentum(closes)
-    r_mr, mr_row = _eval_mean_rev(closes, highs, lows)
+    r_trend, trend_row, trend_w = _eval_trend(closes)
+    r_mom, mom_row, mom_w = _eval_momentum(closes)
+    r_mr, mr_row, mr_w = _eval_mean_rev(closes, highs, lows)
     rows = [trend_row, mom_row, mr_row]
 
     _print_headline(rows)
@@ -395,16 +399,6 @@ def run(
     corr = _correlation_matrix(r_trend, r_mom, r_mr)
     _print_correlation(corr)
 
-    # Recompute weights for the combined eval.
-    trend_w = TrendSignal(lookback_months=10, cash_symbol=CASH).target_weights(
-        closes[TREND_SYMBOLS]
-    )
-    mom_w = MomentumSignal(lookback_months=6, top_n=3, cash_symbol=CASH).target_weights(
-        closes[MOMENTUM_SYMBOLS]
-    )
-    mr_w = MeanReversionSignal(cash_symbol=CASH).target_weights(
-        closes[MEAN_REV_SYMBOLS], highs[MEAN_REV_SYMBOLS], lows[MEAN_REV_SYMBOLS]
-    )
     combined = _combined_eval(r_trend, r_mom, r_mr, closes, trend_w, mom_w, mr_w)
     _print_combined(combined)
 

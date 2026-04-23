@@ -239,7 +239,11 @@ class LiveRunner:
                 result.fills_by_order[str(order.client_order_id)] = outcome.fills
 
             # Post-cycle reconciliation: broker is source of truth.
-            result.final_positions = self._broker.get_positions()
+            # Skip the round-trip on no-op cycles where nothing moved.
+            if result.submitted_orders:
+                result.final_positions = self._broker.get_positions()
+            else:
+                result.final_positions = positions_list
             result.drift = _compute_drift(
                 target_weights=target_weights,
                 latest_prices=latest_prices,
@@ -414,6 +418,10 @@ class LiveRunner:
                 raise
 
 
+def _target_qty(weight: Decimal, price: Decimal, equity: Decimal) -> Decimal:
+    return (equity * weight / price).quantize(Decimal("0.000001"))
+
+
 def _plan_orders(
     *,
     target_weights: dict[str, Decimal],
@@ -430,8 +438,7 @@ def _plan_orders(
         price = latest_prices.get(sym)
         if price is None or price <= _ZERO:
             continue
-        target_dollar = equity * target_weights.get(sym, _ZERO)
-        target_qty = (target_dollar / price).quantize(Decimal("0.000001"))
+        target_qty = _target_qty(target_weights.get(sym, _ZERO), price, equity)
         current_qty = current_positions[sym].qty if sym in current_positions else _ZERO
         delta = target_qty - current_qty
         if abs(delta) < _EPSILON_SHARES:
@@ -462,7 +469,7 @@ def _compute_drift(
         price = latest_prices.get(sym, _ZERO)
         if price <= _ZERO:
             continue
-        target_qty = (equity * target_weights.get(sym, _ZERO) / price).quantize(Decimal("0.000001"))
+        target_qty = _target_qty(target_weights.get(sym, _ZERO), price, equity)
         actual_qty = actual.get(sym, _ZERO)
         diff = actual_qty - target_qty
         if abs(diff) >= _EPSILON_SHARES:
@@ -500,6 +507,11 @@ def _build_default_runner(
     cash_symbol = "SHY"
     all_symbols = [*risk_symbols, cash_symbol]
 
+    # The TrendSignal here needs ~10 months of monthly-resampled data.
+    # 500 daily bars (~24 months) is a generous buffer; constructing a
+    # full 20-year Series per cycle is 80-100x the work.
+    cycle_bar_window = 500
+
     def _closes_provider() -> pd.DataFrame:
         cache = ParquetBarCache(cache_root)
         series: dict[str, pd.Series] = {}
@@ -520,6 +532,7 @@ def _build_default_runner(
             )
             if bars is None:
                 raise ValueError(f"cache miss for {sym}")
+            bars = bars[-cycle_bar_window:]
             series[sym] = pd.Series(
                 [float(b.close) for b in bars],
                 index=[pd.Timestamp(b.ts) for b in bars],
