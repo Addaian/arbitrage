@@ -49,7 +49,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from quant.backtest.deflated_sharpe import annualized_sharpe
-from quant.config import get_settings, load_config_bundle
+from quant.config import ConfigBundle, get_settings, load_config_bundle
 from quant.data.cache import CacheKey, ParquetBarCache
 from quant.execution.alpaca_broker import AlpacaBroker
 from quant.execution.broker_base import Broker
@@ -64,9 +64,12 @@ from quant.monitoring.metrics import (
     set_position_values,
 )
 from quant.monitoring.sentry import capture_cycle_exception
+from quant.portfolio.live_portfolio import MultiStrategyPortfolio
 from quant.risk.killswitch import Killswitch
 from quant.risk.limits import RiskValidator
 from quant.signals.base import SignalStrategy
+from quant.signals.mean_reversion import MeanReversionSignal
+from quant.signals.momentum import MomentumSignal
 from quant.signals.trend import TrendSignal
 from quant.storage.db import get_sessionmaker
 from quant.storage.models import PnlSnapshotORM
@@ -480,13 +483,122 @@ def _compute_drift(
 # --- CLI entry point ---------------------------------------------------
 
 
+_SLEEVE_NAMES = ("trend", "momentum", "mean_reversion")
+# 500 daily bars (~24 months) covers the deepest sleeve lookback
+# (10mo trend SMA) with comfortable buffer; loading full 20yr per
+# cycle is 80-100x the necessary work.
+_CYCLE_BAR_WINDOW = 500
+
+
+def _load_cached_ohlc(
+    cache_root: Path, symbols: list[str], window: int = _CYCLE_BAR_WINDOW
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load (closes, highs, lows) for `symbols` from the latest parquet
+    per symbol, tailed to `window` bars and forward-filled across symbols.
+    """
+    cache = ParquetBarCache(cache_root)
+    closes_d: dict[str, pd.Series] = {}
+    highs_d: dict[str, pd.Series] = {}
+    lows_d: dict[str, pd.Series] = {}
+    for sym in symbols:
+        symbol_dir = cache_root / sym
+        parquets = sorted(symbol_dir.glob("*.parquet")) if symbol_dir.exists() else []
+        if not parquets:
+            raise ValueError(
+                f"no cached bars for {sym}; run `scripts/backfill.py {' '.join(symbols)}` first"
+            )
+        latest = parquets[-1]
+        start_s, end_s = latest.stem.split("_")
+        bars = cache.get(
+            CacheKey(symbol=sym, start=date.fromisoformat(start_s), end=date.fromisoformat(end_s))
+        )
+        if bars is None:
+            raise ValueError(f"cache miss for {sym}")
+        bars = bars[-window:]
+        idx = [pd.Timestamp(b.ts) for b in bars]
+        closes_d[sym] = pd.Series([float(b.close) for b in bars], index=idx, name=sym)
+        highs_d[sym] = pd.Series([float(b.high) for b in bars], index=idx, name=sym)
+        lows_d[sym] = pd.Series([float(b.low) for b in bars], index=idx, name=sym)
+    closes = pd.concat(closes_d.values(), axis=1).sort_index().ffill().dropna(how="all")
+    highs = pd.concat(highs_d.values(), axis=1).sort_index().ffill().dropna(how="all")
+    lows = pd.concat(lows_d.values(), axis=1).sort_index().ffill().dropna(how="all")
+    return closes, highs, lows
+
+
+def _build_multi_strategy_signal(
+    *,
+    bundle: ConfigBundle,
+    sleeve_universes: dict[str, list[str]],
+    sleeve_params: dict[str, dict[str, object]],
+    allocations: dict[str, float],
+    cash_symbol: str,
+    highs_lows_provider: Callable[[], tuple[pd.DataFrame, pd.DataFrame]],
+    regime_model_path: Path,
+) -> MultiStrategyPortfolio:
+    return MultiStrategyPortfolio(
+        name="multi_strategy",
+        trend=TrendSignal(
+            lookback_months=int(sleeve_params["trend"].get("sma_lookback_months", 10)),  # type: ignore[arg-type]
+            cash_symbol=cash_symbol,
+        ),
+        momentum=MomentumSignal(
+            lookback_months=int(sleeve_params["momentum"].get("lookback_months", 6)),  # type: ignore[arg-type]
+            top_n=int(sleeve_params["momentum"].get("top_n", 3)),  # type: ignore[arg-type]
+            cash_symbol=cash_symbol,
+        ),
+        mean_rev=MeanReversionSignal(
+            ibs_entry=float(sleeve_params["mean_reversion"].get("ibs_entry", 0.2)),  # type: ignore[arg-type]
+            ibs_exit=float(sleeve_params["mean_reversion"].get("ibs_exit", 0.7)),  # type: ignore[arg-type]
+            rsi2_entry=float(sleeve_params["mean_reversion"].get("rsi2_entry", 10.0)),  # type: ignore[arg-type]
+            cash_symbol=cash_symbol,
+        ),
+        allocations=allocations,
+        cash_symbol=cash_symbol,
+        sleeve_universes=sleeve_universes,
+        highs_lows_provider=highs_lows_provider,
+        regime_model_path=regime_model_path,
+        target_vol=bundle.risk.target_annual_vol,
+        max_gross_exposure=bundle.risk.max_gross_exposure,
+    )
+
+
+def _extract_sleeve_config(
+    bundle: ConfigBundle,
+) -> tuple[dict[str, list[str]], dict[str, float], dict[str, dict[str, object]]]:
+    """Pull (universe, weight, params) for the three production sleeves
+    from `config/strategies.yaml`. Renormalises weights across only the
+    enabled sleeves so the regime/vol-target overlay rows can carry
+    weight without participating in the per-sleeve allocation sum.
+    """
+    by_name = {s.name: s for s in bundle.strategies.strategies if s.enabled}
+    missing = [n for n in _SLEEVE_NAMES if n not in by_name]
+    if missing:
+        raise ValueError(f"strategies.yaml missing required sleeves: {missing}")
+    sleeve_universes = {n: list(by_name[n].universe) for n in _SLEEVE_NAMES}
+    raw_weights = {n: by_name[n].weight for n in _SLEEVE_NAMES}
+    total = sum(raw_weights.values())
+    if total <= 0.0:
+        raise ValueError("sleeve weights must be positive")
+    allocations = {n: w / total for n, w in raw_weights.items()}
+    sleeve_params = {n: dict(by_name[n].params) for n in _SLEEVE_NAMES}
+    return sleeve_universes, allocations, sleeve_params
+
+
 def _build_default_runner(
     *,
     broker_kind: str = "paper",
     dry_run: bool = False,
     persist: bool = False,
 ) -> LiveRunner:
-    """Wire a default single-strategy runner from config + the Parquet cache.
+    """Wire the production multi-strategy runner from config + the
+    Parquet cache.
+
+    Loads the 3 sleeve allocations + universes from
+    `config/strategies.yaml` and stacks them via
+    `MultiStrategyPortfolio` with the regime + vol-target overlays.
+    The overlays degrade gracefully if their dependencies (HMM model
+    file, vol history) are missing — the bare combined portfolio still
+    runs.
 
     `broker_kind`:
         - "paper"         — in-memory PaperBroker simulator (no network)
@@ -503,43 +615,20 @@ def _build_default_runner(
     settings = get_settings()
     cache_root: Path = settings.quant_data_dir / "parquet"
 
-    risk_symbols = ["SPY", "EFA", "IEF"]
-    cash_symbol = "SHY"
-    all_symbols = [*risk_symbols, cash_symbol]
-
-    # The TrendSignal here needs ~10 months of monthly-resampled data.
-    # 500 daily bars (~24 months) is a generous buffer; constructing a
-    # full 20-year Series per cycle is 80-100x the work.
-    cycle_bar_window = 500
+    bundle = load_config_bundle()
+    sleeve_universes, allocations, sleeve_params = _extract_sleeve_config(bundle)
+    cash_symbol = bundle.universe.cash_symbol
+    all_symbols = sorted(
+        {sym for universe in sleeve_universes.values() for sym in universe} | {cash_symbol}
+    )
 
     def _closes_provider() -> pd.DataFrame:
-        cache = ParquetBarCache(cache_root)
-        series: dict[str, pd.Series] = {}
-        for sym in all_symbols:
-            symbol_dir = cache_root / sym
-            parquets = sorted(symbol_dir.glob("*.parquet")) if symbol_dir.exists() else []
-            if not parquets:
-                raise ValueError(
-                    f"no cached bars for {sym}; "
-                    f"run `scripts/backfill.py {' '.join(all_symbols)}` first"
-                )
-            latest = parquets[-1]
-            start_s, end_s = latest.stem.split("_")
-            bars = cache.get(
-                CacheKey(
-                    symbol=sym, start=date.fromisoformat(start_s), end=date.fromisoformat(end_s)
-                )
-            )
-            if bars is None:
-                raise ValueError(f"cache miss for {sym}")
-            bars = bars[-cycle_bar_window:]
-            series[sym] = pd.Series(
-                [float(b.close) for b in bars],
-                index=[pd.Timestamp(b.ts) for b in bars],
-                name=sym,
-            )
-        frame = pd.concat(series.values(), axis=1).sort_index()
-        return frame.ffill().dropna(how="all")
+        closes, _, _ = _load_cached_ohlc(cache_root, all_symbols)
+        return closes
+
+    def _highs_lows_provider() -> tuple[pd.DataFrame, pd.DataFrame]:
+        _, highs, lows = _load_cached_ohlc(cache_root, all_symbols)
+        return highs, lows
 
     broker: Broker
     if broker_kind == "paper":
@@ -565,12 +654,7 @@ def _build_default_runner(
     else:
         raise ValueError(f"unknown broker kind: {broker_kind!r}")
 
-    # Load the validated risk limits from config/risk.yaml so the
-    # pre-trade gate uses the same caps that the operator signed off on.
-    # PRD §6.1 caps are enforced at config-load time; a hand-constructed
-    # RiskConfig cannot loosen them further.
-    risk_cfg = load_config_bundle().risk
-    risk_validator = RiskValidator(risk_cfg)
+    risk_validator = RiskValidator(bundle.risk)
     killswitch = Killswitch(settings.quant_killswitch_file)
 
     om = OrderManager(
@@ -580,7 +664,16 @@ def _build_default_runner(
         risk_validator=risk_validator,
         killswitch=killswitch,
     )
-    signal = TrendSignal(lookback_months=10, cash_symbol=cash_symbol)
+
+    signal: SignalStrategy = _build_multi_strategy_signal(
+        bundle=bundle,
+        sleeve_universes=sleeve_universes,
+        sleeve_params=sleeve_params,
+        allocations=allocations,
+        cash_symbol=cash_symbol,
+        highs_lows_provider=_highs_lows_provider,
+        regime_model_path=settings.quant_data_dir / "models" / "regime_latest.joblib",
+    )
 
     webhook = (
         str(settings.discord_webhook_url) if settings.discord_webhook_url is not None else None
