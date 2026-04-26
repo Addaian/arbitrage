@@ -35,32 +35,22 @@ from sqlalchemy import select
 
 from quant.backtest import compute_tearsheet, run_backtest
 from quant.backtest.deflated_sharpe import annualized_sharpe
-from quant.config import get_settings
-from quant.data import CacheKey, ParquetBarCache
-from quant.portfolio import combine_weights
-from quant.signals import MeanReversionSignal, MomentumSignal, TrendSignal
+from quant.config import get_settings, load_config_bundle
+from quant.live.runner import (
+    _build_multi_strategy_signal,
+    _extract_sleeve_config,
+    _load_cached_ohlc,
+)
 from quant.storage.db import dispose_engine, get_sessionmaker
 from quant.storage.models import PnlSnapshotORM
 
 CONSOLE = Console()
 
-# Match Wave 16 acceptance numbers — Alpaca ETF cost profile.
+# Stylized Alpaca-paper cost model for the backtest counterpart. Keeps
+# the comparison fair against a paper broker that doesn't itself model
+# slippage. PRD §3.2 fees=0 (commission-free), 3 bps slippage covers
+# bid/ask + market impact at retail size.
 _COSTS = {"fees": 0.0, "slippage": 0.0003}
-_TREND_UNIVERSE = ["SPY", "EFA", "IEF", "SHY"]
-_MOMENTUM_UNIVERSE = [
-    "SPY",
-    "QQQ",
-    "EFA",
-    "EEM",
-    "GLD",
-    "IEF",
-    "TLT",
-    "VNQ",
-    "DBC",
-    "XLE",
-    "SHY",
-]
-_CASH_SYMBOL = "SHY"
 
 
 @dataclass
@@ -156,68 +146,45 @@ async def _run(*, days: int, cache_dir: Path | None) -> TrackingResult:
 
 
 def _backtest_sharpe_for_window(*, start: date, end: date, cache_dir: Path | None = None) -> float:
-    """Run the 3-strategy combined backtest over [start, end] using
-    cached OHLC, return annualized Sharpe on the daily-return series.
-    """
-    cache_root = cache_dir or (get_settings().quant_data_dir / "parquet")
-    cache = ParquetBarCache(cache_root)
+    """Run the production multi-strategy assembly (combined sleeves +
+    regime + vol-target overlays) over [start, end] using cached OHLC,
+    return annualized Sharpe on the daily-return series.
 
-    universe = sorted(set(_MOMENTUM_UNIVERSE + _TREND_UNIVERSE))
-    closes, highs, lows = _load_ohlc(universe, cache, cache_root)
-    # Trim to the requested window.
+    Reuses `_build_multi_strategy_signal` so the backtest counterpart
+    matches the live runner exactly — tracking error then measures only
+    cycle-level execution differences (slippage, partial fills, timing),
+    not strategy-assembly mismatch.
+    """
+    settings = get_settings()
+    cache_root = cache_dir or (settings.quant_data_dir / "parquet")
+
+    bundle = load_config_bundle()
+    sleeve_universes, allocations, sleeve_params = _extract_sleeve_config(bundle)
+    cash_symbol = bundle.universe.cash_symbol
+    union = sorted({sym for u in sleeve_universes.values() for sym in u} | {cash_symbol})
+
+    closes, highs, lows = _load_cached_ohlc(cache_root, union, window=10_000)
     closes = closes.loc[pd.Timestamp(start) : pd.Timestamp(end)]
     highs = highs.loc[pd.Timestamp(start) : pd.Timestamp(end)]
     lows = lows.loc[pd.Timestamp(start) : pd.Timestamp(end)]
     if closes.empty or len(closes) < 2:
         return 0.0
 
-    tw = TrendSignal(lookback_months=10, cash_symbol=_CASH_SYMBOL).target_weights(
-        closes[_TREND_UNIVERSE]
+    signal = _build_multi_strategy_signal(
+        bundle=bundle,
+        sleeve_universes=sleeve_universes,
+        sleeve_params=sleeve_params,
+        allocations=allocations,
+        cash_symbol=cash_symbol,
+        highs_lows_provider=lambda: (highs, lows),
+        regime_model_path=settings.quant_data_dir / "models" / "regime_latest.joblib",
     )
-    mw = MomentumSignal(lookback_months=6, top_n=3, cash_symbol=_CASH_SYMBOL).target_weights(
-        closes[_MOMENTUM_UNIVERSE]
-    )
-    mrw = MeanReversionSignal(cash_symbol=_CASH_SYMBOL).target_weights(
-        closes[_MOMENTUM_UNIVERSE], highs[_MOMENTUM_UNIVERSE], lows[_MOMENTUM_UNIVERSE]
-    )
-
-    alloc = {"trend": 0.40 / 0.85, "momentum": 0.30 / 0.85, "mean_reversion": 0.15 / 0.85}
-    combined = combine_weights({"trend": tw, "momentum": mw, "mean_reversion": mrw}, alloc)
-    result = run_backtest(closes[list(combined.columns)], combined, **_COSTS)
+    weights = signal.target_weights(closes)
+    if weights.dropna(how="all").empty:
+        return 0.0
+    aligned_closes = closes.reindex(columns=weights.columns).ffill()
+    result = run_backtest(aligned_closes, weights, **_COSTS)
     return compute_tearsheet(result).sharpe
-
-
-def _load_ohlc(
-    symbols: list[str], cache: ParquetBarCache, cache_root: Path
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    per_symbol: dict[str, pd.DataFrame] = {}
-    for s in symbols:
-        parquets = sorted((cache_root / s).glob("*.parquet"))
-        if not parquets:
-            raise RuntimeError(f"no cached bars for {s}; run backfill.py first")
-        widest = min(parquets, key=lambda p: p.stem.split("_")[0])
-        start_s, end_s = widest.stem.split("_")
-        bars = cache.get(
-            CacheKey(symbol=s, start=date.fromisoformat(start_s), end=date.fromisoformat(end_s))
-        )
-        if bars is None:
-            raise RuntimeError(f"cache miss on {s}")
-        per_symbol[s] = pd.DataFrame(
-            {
-                "close": [float(b.close) for b in bars],
-                "high": [float(b.high) for b in bars],
-                "low": [float(b.low) for b in bars],
-            },
-            index=[pd.Timestamp(b.ts) for b in bars],
-        )
-    common: pd.DatetimeIndex | None = None
-    for df in per_symbol.values():
-        common = df.index if common is None else common.intersection(df.index)
-    assert common is not None
-    closes = pd.DataFrame({s: per_symbol[s]["close"].loc[common] for s in symbols})
-    highs = pd.DataFrame({s: per_symbol[s]["high"].loc[common] for s in symbols})
-    lows = pd.DataFrame({s: per_symbol[s]["low"].loc[common] for s in symbols})
-    return closes.sort_index(), highs.sort_index(), lows.sort_index()
 
 
 def _print_report(r: TrackingResult) -> None:

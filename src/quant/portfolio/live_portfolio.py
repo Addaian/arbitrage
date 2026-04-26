@@ -56,16 +56,25 @@ class MultiStrategyPortfolio:
     target_vol: float = 0.10
     max_gross_exposure: float = 1.0
 
+    def _slice_cols(self, sleeve: str) -> list[str]:
+        """Sleeve's risk universe + cash. The yaml is inconsistent about
+        whether cash is listed per sleeve; signals require it for
+        rebalance remainders, so we always include it here."""
+        cols = list(self.sleeve_universes[sleeve])
+        if self.cash_symbol not in cols:
+            cols.append(self.cash_symbol)
+        return cols
+
     def target_weights(self, closes: pd.DataFrame) -> pd.DataFrame:
-        trend_w = self.trend.target_weights(closes[self.sleeve_universes["trend"]])
-        mom_w = self.momentum.target_weights(closes[self.sleeve_universes["momentum"]])
+        trend_w = self.trend.target_weights(closes[self._slice_cols("trend")])
+        mom_w = self.momentum.target_weights(closes[self._slice_cols("momentum")])
 
         highs, lows = self.highs_lows_provider()
-        mr_universe = self.sleeve_universes["mean_reversion"]
+        mr_cols = self._slice_cols("mean_reversion")
         mr_w = self.mean_rev.target_weights(
-            closes[mr_universe],
-            highs[mr_universe],
-            lows[mr_universe],
+            closes[mr_cols],
+            highs[mr_cols],
+            lows[mr_cols],
         )
 
         combined = combine_weights(

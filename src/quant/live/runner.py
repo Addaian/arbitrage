@@ -507,7 +507,18 @@ def _load_cached_ohlc(
             raise ValueError(
                 f"no cached bars for {sym}; run `scripts/backfill.py {' '.join(symbols)}` first"
             )
-        latest = parquets[-1]
+        # Multiple parquets may exist from prior backfills with different
+        # ranges. Pick the one with the latest end-date (tiebreak: earliest
+        # start), so we get the freshest bars covering the most history.
+        # Lexicographic `parquets[-1]` would pick by start-date and miss
+        # today's wide backfill if older narrow ones exist.
+        latest = max(
+            parquets,
+            key=lambda p: (
+                date.fromisoformat(p.stem.split("_")[1]),
+                -date.fromisoformat(p.stem.split("_")[0]).toordinal(),
+            ),
+        )
         start_s, end_s = latest.stem.split("_")
         bars = cache.get(
             CacheKey(symbol=sym, start=date.fromisoformat(start_s), end=date.fromisoformat(end_s))

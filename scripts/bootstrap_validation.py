@@ -70,7 +70,15 @@ def _load_ohlc(
             raise typer.BadParameter(
                 f"no cached bars for {sym}; run `scripts/backfill.py {' '.join(universe)}` first"
             )
-        latest = parquets[-1]
+        # Pick the parquet with the latest end-date (tiebreak: earliest
+        # start) — same logic as the runner's _load_cached_ohlc.
+        latest = max(
+            parquets,
+            key=lambda p: (
+                _parse_date(p.stem.split("_")[1]),
+                -_parse_date(p.stem.split("_")[0]).toordinal(),
+            ),
+        )
         start_s, end_s = latest.stem.split("_")
         bars = cache.get(CacheKey(symbol=sym, start=_parse_date(start_s), end=_parse_date(end_s)))
         if bars is None:
