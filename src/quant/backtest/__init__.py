@@ -1,5 +1,12 @@
 """Backtest engine (custom, daily-bar portfolio), walk-forward, Deflated Sharpe."""
 
+from quant.backtest.bootstrap import (
+    BootstrapMetric,
+    bootstrap_backtest,
+    bootstrap_returns,
+    reconstruct_prices,
+    stationary_bootstrap_indices,
+)
 from quant.backtest.deflated_sharpe import (
     DeflatedSharpeResult,
     annualized_sharpe,
@@ -27,6 +34,7 @@ from quant.backtest.walk_forward import (
 
 __all__ = [
     "BacktestResult",
+    "BootstrapMetric",
     "DeflatedSharpeResult",
     "JsonlTrialLog",
     "StrategyFactory",
@@ -37,6 +45,8 @@ __all__ = [
     "WalkForwardResult",
     "align_on_common_dates",
     "annualized_sharpe",
+    "bootstrap_backtest",
+    "bootstrap_returns",
     "clip_to_range",
     "closes_from_bars",
     "compute_tearsheet",
@@ -45,7 +55,9 @@ __all__ = [
     "fixed_params",
     "monthly_returns_pivot",
     "probabilistic_sharpe_ratio",
+    "reconstruct_prices",
     "run_backtest",
+    "stationary_bootstrap_indices",
     "tuned_by_train_sharpe",
     "walk_forward",
 ]
