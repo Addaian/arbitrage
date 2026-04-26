@@ -6,6 +6,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [Post-Wave-20: multi-strategy wiring + bootstrap robustness] — 2026-04-26
+
+The `_build_default_runner` was still wiring **TrendSignal-only** despite Waves 10/11/15/16 building+validating the 3-sleeve combined portfolio with regime + vol-target overlays. This wave wires the validated stack into production, adds a bootstrap-resampling robustness check, and fixes two production bugs that 487 unit tests didn't catch.
+
+### Added
+
+**Python:**
+- `src/quant/portfolio/live_portfolio.py::MultiStrategyPortfolio` — combines 3 sleeves via `combine_weights`, composes regime + vol-target overlays multiplicatively, applies via `apply_regime_overlay`. Implements the `SignalStrategy` protocol so it slots into `LiveRunner`'s existing `signal=` parameter with no runner-side API change. Both overlays degrade gracefully (logged WARNING + skip) when their inputs are missing — fresh deploy with no HMM model still runs the bare combined portfolio.
+- `src/quant/live/runner.py::_extract_sleeve_config` + `_build_multi_strategy_signal` + `_load_cached_ohlc` (module-level helpers) — pull sleeve universes/weights/params from `config/strategies.yaml` and renormalise weights across the 3 sleeves (the yaml has 5 entries — 3 sleeves + 2 overlay rows that carry weight). `_load_cached_ohlc` is shared across runner + scripts.
+- `src/quant/backtest/bootstrap.py` — Politis-Romano stationary block bootstrap. `stationary_bootstrap_indices`, `bootstrap_returns`, `reconstruct_prices`, `bootstrap_backtest`. Geometric block lengths preserve the autocorrelation that trend/momentum strategies depend on.
+
+**CLI:**
+- `scripts/bootstrap_validation.py` — `--strategy {trend,momentum,combined} --n-paths --block-size --gate-low`. Resamples the historical daily-return tape with replacement, runs each surviving strategy through the alternate history, prints realized-vs-{p5,p50,p95} distribution + percentile rank. Exits 1 if realized Sharpe < `--gate-low` (default 0.4) OR below the 5th percentile of the bootstrap.
+
+**Tests:**
+- `tests/unit/test_live_portfolio.py` (5 tests) — combined output sums ~1.0; missing HMM doesn't crash; <20-bar history skips vol-target gracefully; `_extract_sleeve_config` renormalises sleeve weights to ~1.0; `_build_multi_strategy_signal` reads YAML params (not hardcoded).
+- `tests/unit/test_bootstrap.py` (9 tests) — index range + length, geometric block sizes match expected, deterministic under same seed, bootstrap rows are exact copies (no interpolation), reconstruct_prices math, end-to-end bootstrap_backtest, distribution centering smoke check on near-random-walk inputs.
+- `tests/unit/test_full_cycle_e2e.py` (4 tests) — **production wiring smoke test**. Seeds a synthetic Parquet cache under `tmp_path` with both wide and narrow parquets per symbol, runs `_build_default_runner(broker_kind="paper", dry_run=True)`, exercises `run_daily_cycle()` end-to-end. Asserts: loader picks widest parquet (regression for the bug below), MultiStrategyPortfolio is what's wired (not single-strategy), every sleeve slice includes cash (regression for the second bug below), killswitch path still flattens correctly under the multi-strategy assembly.
+
+### Fixed
+
+**Bug 1 (silent narrow-history): `_load_cached_ohlc` picked the lexicographically-last parquet**
+
+When multiple parquets exist in a symbol's cache dir (because the operator ran `backfill.py` more than once with different `--years`), `parquets[-1]` returns the file with the *latest start date*, which is the **narrowest history**. The live cycle was silently using ~1 year of data even when 20 years was sitting next to it — strategies like trend (10mo SMA) had only ~2 months of in-sample data to work with.
+
+Fix: `max(parquets, key=lambda p: (date.fromisoformat(end), -date.fromisoformat(start).toordinal()))` — pick latest end-date, tiebreak earliest start. Same fix in `scripts/bootstrap_validation.py`.
+
+**Bug 2 (silent crash on first cycle): sleeve slices missing cash**
+
+`config/strategies.yaml` lists `universe: [SPY, EFA, IEF, TLT, SGOV]` for trend (cash included) but `universe: [SPY, QQQ, EFA, EEM, GLD, IEF, TLT, VNQ, DBC, XLE]` for momentum and mean_reversion (no cash). Yet all three signals require the cash symbol in their input frame. `MultiStrategyPortfolio.target_weights` was passing the raw sleeve universe to each signal — trend worked, momentum and mean_reversion would have raised on first cycle.
+
+Fix: `MultiStrategyPortfolio._slice_cols` always appends `cash_symbol` if not present in the sleeve's listed universe.
+
+### Updated
+
+- `scripts/paper_vs_backtest.py` — `_backtest_sharpe_for_window` was reimplementing `combine_weights` manually with hardcoded universes / allocations / `_CASH_SYMBOL = "SHY"` (now `SGOV`). Replaced with a direct call to `_build_multi_strategy_signal`. The Gate 3 tracking-error gate now compares paper to **the exact production assembly** including overlays, not a trend-only stand-in. -65 LOC, +30 LOC.
+
+### Operational
+
+- **Backfilled 20yr daily bars** for the full union universe — `SPY QQQ EFA EEM GLD IEF TLT VNQ DBC XLE SGOV` — 51,753 rows total. SGOV is bounded to ~6 years (IPO June 2020); all others have ~20 years. If you want canonical 20-year robustness numbers, `config/universe.yaml` can be flipped to `cash_symbol: SHY` for backtest runs only — keep `SGOV` for live.
+- **Trained the HMM regime model**: `data/models/regime_latest.joblib`. Latest posterior is calm-dominant (calm=0.99, stress=0.00) — last 52w stress-probability mean = 0.000. Regime overlay is therefore a near-no-op at the moment, but is wired and active.
+- Old narrow-history parquets remain in `data/parquet/<sym>/` from prior backfills. Now harmless thanks to Bug 1 fix, but cosmetically noisy. Optional cleanup: `find data/parquet -name "202[3-5]*_*.parquet" -delete`.
+
+### Verified
+
+- **491/491 tests passing** (+1 skipped). Ruff clean, format clean, mypy strict clean on `risk/` + `execution/` + `portfolio/`.
+- `bootstrap_validation.py --strategy combined --n-paths 100` on the full 6-year window: realized Sharpe +0.72 (p5 +0.30, p50 +0.98, p95 +1.73, 25th percentile of the bootstrap distribution → PASS).
+- `_backtest_sharpe_for_window(2020-07 → 2026-04)` reproduces the CHANGELOG's combined-portfolio Sharpe ~0.83 (measured: +0.85), confirming the multi-strategy assembly matches the published research numbers.
+
+### Operator note
+
+Before re-running the paper qualifier or any live cycle:
+1. The live runner now requires the full union universe in the cache. Ensure backfill is fresh — run `uv run python scripts/backfill.py SPY QQQ EFA EEM GLD IEF TLT VNQ DBC XLE SGOV --years 20` if unsure.
+2. The HMM model file at `data/models/regime_latest.joblib` should exist before live; otherwise the regime overlay is silently skipped (the bare combined portfolio still runs). Schedule weekly retrain via the existing `scripts/train_regime.py`.
+3. If you had Wave-20 paper qualifier `pnl_snapshots` accumulated against the trend-only runner, those are no longer comparable to the new combined-portfolio backtest — Gate 3 effectively restarts.
+
 ## [Post-Wave-20: security-review fixes] — 2026-04-23
 
 Two HIGH-severity findings surfaced by the `security-review` skill on the
